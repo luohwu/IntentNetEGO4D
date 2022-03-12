@@ -29,6 +29,10 @@ parser.add_argument('--original_split', default=False, action="store_true",
 
 parser.add_argument('--euler', default=False,action="store_true",
                     help='runing on euler or local computer')
+
+parser.add_argument('--ait', default=False,action="store_true",
+                    help='runing on AIT-server or local computer')
+
 parser.add_argument('--MSE',default=False,action="store_true",
                     help="using MSE as loss function or not")
 parser.add_argument('--C3D',default=False,action='store_true',
