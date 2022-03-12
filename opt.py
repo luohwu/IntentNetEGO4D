@@ -59,7 +59,6 @@ parser.add_argument('--weight_decay', default=0.05, help='weight decay')
 parser.add_argument('--SGD', default=False,action="store_true",
                     help="using SGD or Adam")
 args = parser.parse_args()
-
 if args.euler:
     import tarfile
 
