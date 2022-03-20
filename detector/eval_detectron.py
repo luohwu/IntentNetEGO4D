@@ -89,16 +89,16 @@ if __name__ == '__main__':
     cfg.DATASETS.TRAIN = ("nao_train")
     cfg.DATASETS.TEST = ()
     # Number of data loading threads
-    cfg.DATALOADER.NUM_WORKERS = 2
+    cfg.DATALOADER.NUM_WORKERS = 16
     cfg.MODEL.WEIGHTS = os.path.join( f"../output/model_0024999.pth")   # Let training initialize from model zoo
     # cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
     # Number of images per batch across all machines.
-    cfg.SOLVER.IMS_PER_BATCH = 4
+    cfg.SOLVER.IMS_PER_BATCH = 16
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 256
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_cls  # No. of classes = [HINDI, ENGLISH, OTHER]
     cfg.TEST.EVAL_PERIOD = 5  # No. of iterations after which the Validation Set is evaluated.
     # cfg.MODEL.DEVICE=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    if not args.euler:
+    if not args.euler and not args.ait:
             cfg.MODEL.DEVICE='cpu'
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.05  # set threshold for this model
     predictor = DefaultPredictor(cfg)

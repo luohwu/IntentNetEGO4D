@@ -26,7 +26,7 @@ from detectron2.data import MetadataCatalog, DatasetCatalog
 
 import matplotlib.pyplot as plt
 from detectron2.structures import BoxMode
-from detectron2.engine import DefaultTrainer
+from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, hooks, launch
 from detectron2.config import get_cfg
 import os
 from opt import *
@@ -123,25 +123,20 @@ def get_nao_dicts(data):
 
 
 
-
-
-if __name__ == '__main__':
+def main(args2):
     experiment = Experiment(
         api_key="wU5pp8GwSDAcedNSr68JtvCpk",
         project_name="training-faster-rcnn",
         workspace="thesisproject",
     )
 
-
-    num_cls=len(args.noun_categories)
+    num_cls = len(args.noun_categories)
     # classes = data['class'].unique()
     for d in ["train", "val"]:
-        DatasetCatalog.register("nao_" + d, lambda d=d: get_nao_dicts(make_sequence_dataset('all',args.dataset)))
+        DatasetCatalog.register("nao_" + d, lambda d=d: get_nao_dicts(make_sequence_dataset(d, args.dataset)))
         MetadataCatalog.get("nao_" + d).set(thing_classes=args.noun_categories)
     nao_train_metadata = MetadataCatalog.get("nao_train")
     print(nao_train_metadata)
-
-
 
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file(
@@ -157,16 +152,33 @@ if __name__ == '__main__':
     cfg.SOLVER.IMS_PER_BATCH = args.bs
     cfg.SOLVER.BASE_LR = 0.00125  # pick a good LearningRate
     cfg.SOLVER.MAX_ITER = 49000  # No. of iterations
-    cfg.SOLVER.STEPS= (15000, 20000)
+    cfg.SOLVER.STEPS = (15000, 20000)
     print(f'MAX ITERS:{cfg.SOLVER.MAX_ITER}')
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 256
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_cls  # No. of classes = [HINDI, ENGLISH, OTHER]
     cfg.TEST.EVAL_PERIOD = 1000  # No. of iterations after which the Validation Set is evaluated.
     # cfg.MODEL.DEVICE=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    if args.euler=='False' and args.ait==False:
+    cfg.NUM_GPUS = 2
+    cfg.MODEL.NUM_GPUS = 2
+    if args.euler == 'False' and args.ait == False:
         cfg.MODEL.DEVICE = 'cpu'
+    else:
+        cfg.MODEL.NUM_GPUS = 2
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
     # trainer = Trainer(cfg)
     trainer = DefaultTrainer(cfg)
     trainer.resume_or_load(resume=False)
-    trainer.train()
+    return trainer.train()
+
+
+if __name__ == '__main__':
+    args2 = default_argument_parser()
+    args2 = args2.parse_args([])
+    launch(
+        main,
+        4,# number of gpus
+        num_machines=args2.num_machines,
+        machine_rank=args2.machine_rank,
+        dist_url=args2.dist_url,
+        args=(args2,),
+    )

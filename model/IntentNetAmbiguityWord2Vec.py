@@ -14,10 +14,8 @@ import torch.nn.functional as F
 from opt import *
 from model.IntentNetAmbiguity  import *
 from data.dataset_ambiguity import generate_mask
-p_dropout=0.5 if args.dataset=='EPIC' else 0.2
+p_dropout=0.5
 
-print('current graphics card is:')
-os.system('lspci | grep VGA')
 device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 import gensim.downloader
@@ -127,6 +125,8 @@ def main():
     if args.euler:
         img_file=os.path.join(args.frames_path,'5f527d09-15e5-46c1-8ca4-949a2ba3d5ff','frame_0000002880.jpg')
 
+    elif args.ait:
+        img_file = img_file=os.path.join(args.frames_path,'5f527d09-15e5-46c1-8ca4-949a2ba3d5ff','frame_0000002880.jpg')
     else:
         img_file = '/media/luohwu/T7/dataset/EGO4D/rgb_frames_resized/5f527d09-15e5-46c1-8ca4-949a2ba3d5ff/frame_0000002880.jpg'
 
@@ -180,11 +180,8 @@ def main():
         loss.backward()
         optimizer.step()
         output_numpy = output[0].cpu().detach().numpy()
-        if args.euler:
-            cv2.imwrite(f'/cluster/home/luohwu/experiments/draft/output_{i}.png', output_numpy * 255)
-        else:
-            # cv2.imwrite(f'/media/luohwu/T7/experiments/draft/output_{i}.png', output_numpy * 255)
-            cv2.imwrite(f'/home/luohwu/euler/experiments/draft/output_{i}.png', output_numpy * 255)
+        im_path=os.path.join(args.exp_path,'draft',f'output_{i}.jpg')
+        cv2.imwrite(im_path, output_numpy * 255)
         # cv2.waitKey(0)
     # cv2.imshow('output', output_numpy)
     # cv2.waitKey(0)

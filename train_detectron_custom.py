@@ -1,15 +1,8 @@
 from comet_ml import Experiment
-import time
 from ast import literal_eval
 
 import pandas as pd
 import torch
-from PIL import Image,ImageOps
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-import cv2
-from opt import *
-import detectron2
 from detectron2.utils.logger import setup_logger
 setup_logger()
 
@@ -19,18 +12,16 @@ import os, json, cv2, random
 
 # import some common detectron2 utilities
 from detectron2 import model_zoo
-from detectron2.engine import DefaultPredictor
-from detectron2.config import get_cfg
-from detectron2.utils.visualizer import Visualizer
-from detectron2.data import MetadataCatalog, DatasetCatalog
+from detectron2.data import MetadataCatalog, DatasetCatalog,build_detection_train_loader
 
-import matplotlib.pyplot as plt
 from detectron2.structures import BoxMode
 from detectron2.engine import DefaultTrainer
 from detectron2.config import get_cfg
-import os
 from opt import *
 from tools.Schedulers import DecayCosinWarmRestars
+from detectron2.modeling import build_model
+from detectron2.solver import build_lr_scheduler, build_optimizer
+from detectron2.utils.events import EventStorage
 class Trainer(DefaultTrainer):
     @classmethod
     def build_optimizer(cls, cfg, model):
@@ -144,29 +135,44 @@ if __name__ == '__main__':
 
 
     cfg = get_cfg()
+    # cfg.merge_from_file(model_zoo.get_config_file(
+    #     "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))  # Get the basic model configuration from the model zoo
     cfg.merge_from_file(model_zoo.get_config_file(
-        "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))  # Get the basic model configuration from the model zoo
+        "COCO-Detection/faster_rcnn_R_50_FPN_1x.yaml"))  # Get the basic model configuration from the model zoo
     # Passing the Train and Validation sets
     cfg.DATASETS.TRAIN = ("nao_train")
     cfg.DATASETS.TEST = ()
     # Number of data loading threads
-    cfg.DATALOADER.NUM_WORKERS = 8
+    cfg.DATALOADER.NUM_WORKERS = 4
     cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
         "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
+        "COCO-Detection/faster_rcnn_R_50_FPN_1x.yaml")  # Let training initialize from model zoo
     # Number of images per batch across all machines.
-    cfg.SOLVER.IMS_PER_BATCH = args.bs
-    cfg.SOLVER.BASE_LR = 0.00125  # pick a good LearningRate
-    cfg.SOLVER.MAX_ITER = 49000  # No. of iterations
+    cfg.SOLVER.IMS_PER_BATCH = 1
+    cfg.SOLVER.BASE_LR = 0.000125  # pick a good LearningRate
+    cfg.SOLVER.MAX_ITER = 29000  # No. of iterations
     cfg.SOLVER.STEPS= (15000, 20000)
     print(f'MAX ITERS:{cfg.SOLVER.MAX_ITER}')
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 256
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_cls  # No. of classes = [HINDI, ENGLISH, OTHER]
     cfg.TEST.EVAL_PERIOD = 1000  # No. of iterations after which the Validation Set is evaluated.
     # cfg.MODEL.DEVICE=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    if args.euler=='False' and args.ait==False:
+    if args.euler=='False' and args.ait=='False':
         cfg.MODEL.DEVICE = 'cpu'
+    # cfg.SOLVER.LR_SCHEDULER_NAME='WarmupCosineLR'
+    cfg.SOLVER.WARMUP_ITERS=100
+    cfg.OUTPUT_DIR='./output'
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
-    # trainer = Trainer(cfg)
-    trainer = DefaultTrainer(cfg)
-    trainer.resume_or_load(resume=False)
-    trainer.train()
+    epochs=500
+
+    model=build_model(cfg)
+    optimizer = build_optimizer(cfg, model)
+    scheduler = build_lr_scheduler(cfg, optimizer)
+    data_loader = build_detection_train_loader(cfg)
+    for i in range(500):
+        for i,data in enumerate(data_loader):
+            print(i)
+
+
+

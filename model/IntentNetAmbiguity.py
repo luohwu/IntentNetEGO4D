@@ -15,8 +15,6 @@ from opt import *
 
 p_dropout=0.5 if args.dataset=='EPIC' else 0.2
 
-print('current graphics card is:')
-os.system('lspci | grep VGA')
 device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class ConvBlock(nn.Module):
     def __init__(self,in_c,out_c,padding=1):
