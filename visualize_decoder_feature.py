@@ -40,12 +40,16 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 def main():
-    model=IntentNetBaseWord2Vec()
+    # model=IntentNetBaseWord2VecNormalized()
+    model = IntentNetBaseWord2Vec()
+    model=nn.DataParallel(model)
     total_params = sum(p.numel() for p in model.parameters())
     print(f'model size: {total_params}')
-    # model.load_state_dict(
-    #     torch.load(f'/home/luohwu/ait-data/experiments/EGO4D/base/ckpts/model_epoch_60.pth', map_location='cpu')[
-    #         'model_state_dict'], strict=False)
+    model_path=os.path.join(args.exp_path,'EGO4D','base','ckpts/model_epoch_40.pth')
+    # model_path='/data/luohwu/experiments/EGO4D/base/ckpts/model_epoch_80.pth'
+    model.load_state_dict(
+        torch.load(model_path, map_location='cpu')[
+            'model_state_dict'], strict=True)
 
     model = model.to(device)
 
@@ -59,25 +63,13 @@ def main():
 
     print(f'train dataset size: {len(train_dataset)}, test dataset size: {len(test_dataset)}')
 
-    test_dataloader = DataLoader(test_dataset,
+    test_dataloader = DataLoader(train_dataset,
                                 batch_size=1,
                                 shuffle=True, num_workers=2,
                                 pin_memory=True,
                                 drop_last=True if torch.cuda.device_count() >= 4 else False,
                                  collate_fn=my_collate)
 
-    if args.SGD:
-        print('using SGD')
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
-    else:
-
-        print('using AdamW')
-        optimizer = optim.AdamW(filter(lambda  p: p.requires_grad,model.parameters()),
-                                lr=args.lr,
-                                betas=(0.9, 0.99),
-                                weight_decay=0
-                                # ,weight_decay=args.weight_decay
-                                )
 
 
 
@@ -101,69 +93,75 @@ def eval(test_dataloader, model, criterion, epoch, illustration):
     top_1_all=0
     top_3_all=0
     len_dataset = len(test_dataloader.dataset)
+    np.set_printoptions(suppress=True)
     with torch.no_grad():
         for i_iter, data in enumerate(test_dataloader):
             frame,all_bboxes, img_path,mask,labels = data
-            frame=frame.to(device)
-            mask=mask.to(device)
+            if (len(labels[0]) > 3):
+                frame=frame.to(device)
+                mask=mask.to(device)
+                print(f'sum of mask: {mask.sum()}')
 
-            output, decoder_feature,contributions = model(frame)
-            print(contributions)
-            if isinstance(model,IntentNetBaseWord2Vec):
+                output, decoder_feature,contributions = model(frame)
+                print(f'sum of mask: {mask.sum()}, sum of outputs: {output.sum()}')
+                print(contributions.detach().cpu().numpy())
                 similarity_list, attention_list = compute_similarity_and_interaction_scores_w2v(
                     labels[0],
                     output=output[0], bboxes=all_bboxes[0])
-            else:
-                similarity_list, attention_list = compute_similarity_and_interaction_scores(
-                    decoder_feature=decoder_feature[0],
-                    output=output[0], bboxes=all_bboxes[0])
-            print(similarity_list)
-            print(attention_list)
-            for j in range(64):
-                feature=torch.tanh(decoder_feature[0,j,:,:])*255*3
-                # feature = torch.softmax(decoder_feature[0, i, :, :].view(1,1,-1),dim=2).view(256,456) * 255*100
-                feature_numpy=feature.cpu().detach().numpy()
-                if not os.path.exists(f'{args.exp_path}/{args.dataset}/ambiguity/features/{i_iter}'):
-                    os.mkdir(f'{args.exp_path}/{args.dataset}/ambiguity/features/{i_iter}')
-                saved_path = f'{args.exp_path}/{args.dataset}/ambiguity/features/{i_iter}/{j}.jpg'
-                cv2.imwrite(saved_path,feature_numpy)
+                print(similarity_list)
+                print(attention_list)
+                for j in range(64):
+                    feature=torch.tanh(decoder_feature[0,j,:,:])*255*3
+                    # feature = torch.softmax(decoder_feature[0, i, :, :].view(1,1,-1),dim=2).view(256,456) * 255*100
+                    feature_numpy=feature.cpu().detach().numpy()
+                    if not os.path.exists(f'{args.exp_path}/{args.dataset}/ambiguity/features/{i_iter}'):
+                        os.system(f'mkdir -p {args.exp_path}/{args.dataset}/ambiguity/features/{i_iter}')
+                        # os.mkdir(f'{args.exp_path}/{args.dataset}/ambiguity/features/{i_iter}')
+                    saved_path = f'{args.exp_path}/{args.dataset}/ambiguity/features/{i_iter}/{j}.jpg'
+                    cv2.imwrite(saved_path,feature_numpy)
 
-            del frame
-            illustration=True
-            if illustration:
-                for i in range(mask.shape[0]):
-                    top_1,top_3=compute_acc(output[i],all_bboxes[i])
-                    top_1_all+=top_1
-                    top_3_all+=top_3
-                    mask=np.ones((256,456),dtype=np.uint8)*1
-                    img_path_item=img_path[i]
-                    original_image=cv2.imread(img_path_item)
-                    original_image_bbox = cv2.imread(img_path_item)
-                    original_image_bbox=cv2.rectangle(original_image_bbox,(all_bboxes[i][0][0],all_bboxes[i][0][1]),
-                                                 (all_bboxes[i][0][2],all_bboxes[i][0][3]),(255,0,0),2)
-                    mask[all_bboxes[i][0][1]:all_bboxes[i][0][3],all_bboxes[i][0][0]:all_bboxes[i][0][2]]=1
-                    ro_bboxes=all_bboxes[i][1:]
-                    for j,box in enumerate(ro_bboxes):
-                        original_image_bbox = cv2.rectangle(original_image_bbox, (box[0], box[1]),
-                                                       (box[2], box[3]), (0, 255, 0), 2)
-                        mask[box[1]:box[3],box[0]:box[2]]=1
-                        cv2.putText(original_image_bbox, f'i:{attention_list[j]:.2f}', (box[0]+5,box[1]+25),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36, 12, 255), 1)
-                        cv2.putText(original_image_bbox, f's:{similarity_list[j]:.2f}', (box[0]+5, box[1] +10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (36, 12, 255), 1)
+                del frame
+                illustration=True
+                if illustration:
+                    for i in range(mask.shape[0]):
+                        top_1,top_3=compute_acc(output[i],all_bboxes[i])
+                        top_1_all+=top_1
+                        top_3_all+=top_3
+                        mask=np.ones((256,456),dtype=np.uint8)*1
+                        img_path_item=img_path[i]
+                        original_image=cv2.imread(img_path_item)
+                        original_image_bbox = cv2.imread(img_path_item)
+                        original_image_bbox=cv2.rectangle(original_image_bbox,(all_bboxes[i][0][0],all_bboxes[i][0][1]),
+                                                     (all_bboxes[i][0][2],all_bboxes[i][0][3]),(255,0,0),2)
+                        mask[all_bboxes[i][0][1]:all_bboxes[i][0][3],all_bboxes[i][0][0]:all_bboxes[i][0][2]]=1
+                        ro_bboxes=all_bboxes[i][1:]
+                        for j,box in enumerate(ro_bboxes):
+                            original_image_bbox = cv2.rectangle(original_image_bbox, (box[0], box[1]),
+                                                           (box[2], box[3]), (0, 255, 0), 2)
+                            mask[box[1]:box[3],box[0]:box[2]]=1
+                            font_size=0.5
+                            cv2.putText(original_image_bbox, f'i:{attention_list[j]:.2f}', (box[0]+5,box[1]+25),
+                                        cv2.FONT_HERSHEY_SIMPLEX, font_size, (36, 12, 255), 1)
+                            cv2.putText(original_image_bbox, f's:{similarity_list[j]:.2f}', (box[0]+5, box[1] +10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, font_size, (36, 12, 255), 1)
 
-                    output_item=output[i]*255
-                    output_item=output_item.cpu().detach().numpy().astype(np.uint8)
-                    output_item=output_item*mask
-                    # output_item=heatmap_to_bbox(output_item)
-                    output_item=cv2.applyColorMap(output_item,cv2.COLORMAP_JET)
-                    masked_img=cv2.addWeighted(original_image,0.7,output_item,0.3,0)
-                    saved_img=np.concatenate((original_image_bbox,masked_img),axis=1)
-                    saved_path = f'{args.exp_path}/{args.dataset}/ambiguity/features/{i_iter}/original.jpg'
-                    # print(saved_path)
-                    saved_img=cv2.resize(saved_img,(456*4,256*2))
-                    cv2.imwrite(saved_path,saved_img)
-                    print('end of one sample')
+                        output_item=output[i]*255
+                        output_item=output_item.cpu().detach().numpy().astype(np.uint8)
+                        output_item=output_item*mask
+                        # output_item=heatmap_to_bbox(output_item)
+                        output_item=cv2.applyColorMap(output_item,cv2.COLORMAP_JET)
+                        masked_img = output_item
+                        # masked_img = cv2.addWeighted(original_image, 0, output_item, 1.0, 0)
+
+                        saved_img=np.concatenate((original_image_bbox,masked_img),axis=1)
+                        saved_path = f'{args.exp_path}/{args.dataset}/ambiguity/features/{i_iter}/original.jpg'
+                        # print(saved_path)
+                        saved_img=cv2.resize(saved_img,(456*4,256*2))
+                        cv2.imwrite(saved_path,saved_img)
+                        with open(f'{args.exp_path}/{args.dataset}/ambiguity/features/{i_iter}/img_path.txt','w') as f:
+                            f.write(f'end of one sample: {img_path[0]}')
+                            f.close()
+                        print(f'end of one sample: {img_path[0]}')
 
         test_loss_avg = total_test_loss / len_dataset
     print(f'top-1: {top_1_all/len_dataset}, top-3: {top_3_all/len_dataset}')
@@ -247,6 +245,11 @@ def compute_acc(output,bboxes):
 
 
 if __name__ == '__main__':
-
+    if args.ait:
+        experiment = Experiment(
+            api_key="wU5pp8GwSDAcedNSr68JtvCpk",
+            project_name="intentnetego4d",
+            workspace="thesisproject",
+        )
     main()
 

@@ -14,8 +14,9 @@ import torch.nn.functional as F
 from opt import *
 from model.IntentNetAmbiguity  import *
 from data.dataset_ambiguity import generate_mask
-p_dropout=0.2
+p_dropout=0.5
 
+device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 import gensim.downloader
 
@@ -41,8 +42,7 @@ class IntentNetBaseWord2Vec(nn.Module):
         map=kornia.filters.gaussian_blur2d(map,(171,171),(100.5,100.5))
         for i in range(64):
             cv2.imwrite(f'{args.exp_path}/draft/0_map/{i}.jpg',map[0,i].numpy()*255)
-        # self.map=map.to(device)
-        self.map=map
+        self.map=map.to(device)
 
         self.contribution = nn.Sequential(
             nn.AdaptiveAvgPool2d((1, 1)),
@@ -58,7 +58,7 @@ class IntentNetBaseWord2Vec(nn.Module):
         decoder_feature=self.decoder(feature_last_layer,encoder_features[:-1][::-1])
         # decoder_feature=F.softmax(decoder_feature.view(-1,64,116736),dim=2).view_as(decoder_feature)
         decoder_feature=F.layer_norm(decoder_feature,[256,456])
-        decoder_feature=decoder_feature*self.map.to(decoder_feature.device)
+        decoder_feature=decoder_feature*self.map
         # decoder_feature=F.sigmoid(decoder_feature)
         contributions=self.contribution(feature_last_layer)
         # contributions_normalized=torch.softmax(contributions,dim=(1))
@@ -93,11 +93,14 @@ class IntentNetBaseWord2VecNormalized(nn.Module):
         # decoder_feature=F.softmax(decoder_feature.view(-1,64,116736),dim=2).view_as(decoder_feature)
         # decoder_feature=F.layer_norm(decoder_feature,[256,456])
         # decoder_feature=F.softmax(decoder_feature.view(B,64,-1)/0.1,dim=2).view(B,64,256,456)*10000
+
+        # decoder_feature=F.softmax(decoder_feature.view(B,64,-1)/1,dim=2).view(B,64,256,456)*10000
         # decoder_feature=F.sigmoid(decoder_feature)
         contributions=self.contribution(feature_last_layer)
         # contributions_normalized=torch.softmax(contributions,dim=(1))
         output = self.head((decoder_feature*contributions.view(-1,64,1,1)).sum(1))
         return output,decoder_feature,contributions
+
 
 glove_vectors = gensim.downloader.load('glove-twitter-25')
 
@@ -106,11 +109,11 @@ class AttentionLossWord2Vec(nn.Module):
         super(AttentionLossWord2Vec, self).__init__()
         self.BCE=nn.BCELoss(reduction='none')
 
-    def forward(self,outputs,targets,labels,bboxes):
+    def forward(self,outputs,targets,labels,bboxes,decoder_features):
 
         B,H,W=outputs.shape
         weight_masks=torch.ones(B,H,W,requires_grad=False)*0.8
-        weight_masks=weight_masks.to(outputs.device)
+        weight_masks=weight_masks.to(device)
         with torch.no_grad():
             for i in range(B):
                 nao_label=labels[i][0]
@@ -120,11 +123,13 @@ class AttentionLossWord2Vec(nn.Module):
                     ro_label=labels[i][j]
                     similarity=compute_similarity(nao_label,ro_label)
                     # print(cos_similarity)
-                    # weight_masks[i,box[1]:box[3], box[0]:box[2]] += torch.tensor(similarity)
-                    weight_masks[i,box[1]:box[3], box[0]:box[2]] += torch.tensor(similarity)/3.
+                    weight_masks[i,box[1]:box[3], box[0]:box[2]] += torch.tensor(similarity)/3
 
         pixel_wise_loss=self.BCE(outputs,targets)*weight_masks
-        return pixel_wise_loss.mean()
+
+        #variance:
+        var=-torch.var(decoder_features,1)
+        return pixel_wise_loss.mean()+torch.mean(var)
 
 def calibrate_label(label):
     if label=='indument':
@@ -147,8 +152,8 @@ def main():
     import numpy as np
     # model = IntentNetBaseAdaptive()
     # model = IntentNetBase()
-    # model = IntentNetBaseWord2VecNormalized()
-    model = IntentNetBaseWord2Vec()
+    model = IntentNetBaseWord2VecNormalized()
+    # model = IntentNetBaseWord2Vec()
     model=model.to(device)
     model_size=sum(p.numel() for p in model.parameters())
     print(f'model size: {model_size}')
@@ -209,7 +214,7 @@ def main():
         # weight_numpy=weight.numpy()
         # cv2.imshow('weight',weight_numpy)
         # cv2.waitKey(0)
-        loss = loss_fn(output, target,labels,all_bboxes)
+        loss = loss_fn(output, target,labels,all_bboxes,decoder_feautre)
         print('='*50)
         print(f'epoch: {i}/{epoch}, loss: {loss.item()}')
         optimizer.zero_grad()

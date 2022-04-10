@@ -78,7 +78,8 @@ def detect_relevant_objects(row,img_folder):
         for box in pred_boxes:
             relevant_objs.append(box.int().cpu().numpy().tolist())
     # print(relevant_objs)
-    idx_to_remove=none_maximum_suppression(relevant_objs)
+    # idx_to_remove=none_maximum_suppression(relevant_objs)
+    idx_to_remove=[] # no NMS
     # print(idx_to_remove)
     ro_bbox = [relevant_objs[i] for i in range(len(relevant_objs)) if i not in idx_to_remove]
 
@@ -105,7 +106,8 @@ def detect_relevant_objects2(row,img_folder):
         for box in pred_boxes:
             relevant_objs.append(box.int().cpu().numpy().tolist())
 
-    idx_to_remove = none_maximum_suppression(relevant_objs)
+    # idx_to_remove = none_maximum_suppression(relevant_objs)
+    idx_to_remove=[]
 
     cls=outputs['instances'].pred_classes.cpu().detach().numpy().tolist()
     labels= nao_train_metadata.thing_classes[cls]
@@ -141,7 +143,7 @@ if __name__ == '__main__':
     cfg.DATASETS.TEST = ()
     # Number of data loading threads
     cfg.DATALOADER.NUM_WORKERS = 16
-    cfg.MODEL.WEIGHTS = os.path.join( f"../output_all/model_0024999.pth")   # Let training initialize from model zoo
+    cfg.MODEL.WEIGHTS = os.path.join( f"../output_all/model_0024999.pth")  # Let training initialize from model zoo
     # cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
     # Number of images per batch across all machines.
     cfg.SOLVER.IMS_PER_BATCH = 16
@@ -151,14 +153,14 @@ if __name__ == '__main__':
     # cfg.MODEL.DEVICE=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if not args.euler and not args.ait:
             cfg.MODEL.DEVICE='cpu'
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.35  #0.1~ 0.27 , 0.35~0.35
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.05
     predictor = DefaultPredictor(cfg)
 
     # cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR,
     #                                  f"model_final_{args.dataset}.pth")  # Let training initialize from model zoo
     # predictor_resized = DefaultPredictor(cfg)
 
-    clip_id_list = sorted(args.all_clip_ids)
+    clip_id_list = sorted(args.val_clip_ids)
     for i,clip_id in enumerate(sorted(clip_id_list)):
         img_folder=os.path.join(args.frames_path, clip_id)
         anno_file_path = os.path.join(args.annos_path, f'{clip_id}.csv')

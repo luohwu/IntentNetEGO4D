@@ -136,7 +136,7 @@ if __name__ == '__main__':
     num_cls=len(args.noun_categories)
     # classes = data['class'].unique()
     for d in ["train", "val"]:
-        DatasetCatalog.register("nao_" + d, lambda d=d: get_nao_dicts(make_sequence_dataset('all',args.dataset)))
+        DatasetCatalog.register("nao_" + d, lambda d=d: get_nao_dicts(make_sequence_dataset(d,args.dataset)))
         MetadataCatalog.get("nao_" + d).set(thing_classes=args.noun_categories)
     nao_train_metadata = MetadataCatalog.get("nao_train")
     print(nao_train_metadata)
@@ -150,14 +150,15 @@ if __name__ == '__main__':
     cfg.DATASETS.TRAIN = ("nao_train")
     cfg.DATASETS.TEST = ()
     # Number of data loading threads
-    cfg.DATALOADER.NUM_WORKERS = 8
+    cfg.DATALOADER.NUM_WORKERS = 16
     cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(
         "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
     # Number of images per batch across all machines.
     cfg.SOLVER.IMS_PER_BATCH = args.bs
     cfg.SOLVER.BASE_LR = 0.00125  # pick a good LearningRate
-    cfg.SOLVER.MAX_ITER = 49000  # No. of iterations
-    cfg.SOLVER.STEPS= (15000, 20000)
+    cfg.SOLVER.MAX_ITER = 49000*3  # No. of iterations
+    # cfg.SOLVER.STEPS= (15000,48999*3)
+    cfg.SOLVER.STEPS = (48998*3, 48999*3)
     print(f'MAX ITERS:{cfg.SOLVER.MAX_ITER}')
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 256
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_cls  # No. of classes = [HINDI, ENGLISH, OTHER]
@@ -168,5 +169,5 @@ if __name__ == '__main__':
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
     # trainer = Trainer(cfg)
     trainer = DefaultTrainer(cfg)
-    trainer.resume_or_load(resume=False)
+    trainer.resume_or_load(resume=True)
     trainer.train()

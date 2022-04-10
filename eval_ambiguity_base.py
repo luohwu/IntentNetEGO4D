@@ -52,16 +52,20 @@ def add_interaction_scores(row,clip_id,model):
     input=input.unsqueeze(0)
     output, decoder_feautre, contribution = model(input)
     interaction_scores=compute_interaction_scores(output,row['ro_bbox'])
+    # print(interaction_scores)
     return interaction_scores
 
 
 
 def main():
     model=IntentNetBaseWord2Vec()
+    model=nn.DataParallel(model)
     total_params = sum(p.numel() for p in model.parameters())
     print(f'model size: {total_params}')
+    model_path=os.path.join(args.exp_path,'EGO4D',args.exp_name,'ckpts/model_epoch_20.pth')
+    print(model_path)
     model.load_state_dict(
-        torch.load(f'{args.exp_path}/EGO4D/base/ckpts/model_epoch_40.pth', map_location='cpu')[
+        torch.load(model_path, map_location='cpu')[
             'model_state_dict'], strict=False)
 
     model = model.to(device)
@@ -69,7 +73,7 @@ def main():
 
     print(f'dataset name: EGO4D')
     # val is the same as test
-    mode='val'
+    mode='all'
     if mode == 'all':
         clip_ids = args.all_clip_ids
     elif mode == 'train':
@@ -94,7 +98,7 @@ def main():
                                               "noun": literal_eval}
                                 )
             annos['interaction_scores']=annos.apply(add_interaction_scores,model=model,clip_id=clip_id,axis=1)
-            annos.to_csv(f'/cluster/home/luohwu/dataset/EGO4D/nao_annotations/{clip_id}.csv',index=False)
+            annos.to_csv(anno_path,index=False)
 
     # df_items=df_items.rename(columns={'class':'category'})
     # df_items = df_items.rename(columns={'nao_bbox_resized': 'nao_bbox'})
@@ -108,7 +112,7 @@ def compute_interaction_scores(output,bboxes):
     for i,box in enumerate(ro_bbox):
         # print(box)
         area = (box[2] - box[0] + 1) * (box[3] - box[1] + 1)
-        attention = output[box[1]:box[3], box[0]:box[2]].sum() / (area)
+        attention = output[0,box[1]:box[3], box[0]:box[2]].sum()/area
         attention_list.append(attention.item())
     return attention_list
 

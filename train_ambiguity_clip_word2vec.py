@@ -7,23 +7,22 @@ import torch.cuda
 from torch import optim
 from torch.utils.data import DataLoader
 from opt import *
-import tarfile
 from torch import  nn
 import pandas as pd
 import cv2
 import numpy as np
 from tools.Schedulers import *
-from data.dataset_ambiguity import NAODatasetBase,my_collate
-from model.IntentNetAmbiguityWord2Vec import *
+from data.dataset_ambiguity_clip import NAODatasetClip,my_collate
+from model.IntentNetAmbiguityClip import IntentNetClipWord2Vec,AttentionLossWord2Vec
 
 experiment = Experiment(
     api_key="wU5pp8GwSDAcedNSr68JtvCpk",
-    project_name="intentnetego4d",
+    project_name="intentnetego4d-clip",
     workspace="thesisproject",
 )
-experiment.log_code('data/dataset_ambiguity.py')
-experiment.log_code('model/IntentNetAmbiguity.py')
-experiment.log_code('model/IntentNetAmbiguityWord2Vec.py')
+experiment.log_code('data/dataset_ambiguity_clip.py')
+experiment.log_code('model/IntentNetAmbiguityClip.py')
+experiment.log_code('backbone/DPC.py')
 experiment.log_parameters(args.__dict__)
 SEED = args.seed
 torch.manual_seed(SEED)
@@ -45,20 +44,24 @@ os.system('lspci | grep VGA')
 def main():
 
     # model = IntentNetBaseWord2VecNormalized()
-    model = IntentNetBaseWord2Vec()
+    model = IntentNetClipWord2Vec()
     model = nn.DataParallel(model)
+    model=model.to(device)
     total_params = sum(p.numel() for p in model.parameters())
     print(f'model size: {total_params}')
-    model_path = os.path.join(args.exp_path, 'EGO4D', 'base', 'ckpts/model_epoch_120.pth')
+    # model_path = os.path.join(args.exp_path, 'EGO4D', 'base', 'ckpts/model_epoch_120.pth')
     # model_path='/data/luohwu/experiments/EGO4D/base/ckpts/model_epoch_120.pth'
-    model.load_state_dict(
-        torch.load(model_path, map_location='cpu')[
-            'model_state_dict'])
+    # model.load_state_dict(
+    #     torch.load(model_path, map_location='cpu')[
+    #         'model_state_dict'])
 
-    model = model.to(device)
+    for param in model.module.backbone.parameters():
+        param.requires_grad = True
 
-    train_dataset = NAODatasetBase(mode='train', dataset_name=args.dataset)
-    val_dataset = NAODatasetBase(mode='val', dataset_name=args.dataset)
+    train_dataset = NAODatasetClip(mode='train', dataset_name=args.dataset)
+    # indices = torch.randperm(len(train_dataset))[:32*5].tolist()
+    # train_dataset = torch.utils.data.Subset(train_dataset, indices)
+    val_dataset = NAODatasetClip(mode='val', dataset_name=args.dataset)
     print(f'length of train_dataset: {len(train_dataset)}')
     print(f'length of val_dataset: {len(val_dataset)}')
 
@@ -71,27 +74,23 @@ def main():
     train_dataloader = DataLoader(train_dataset, batch_size=args.bs,
                                   shuffle=True, num_workers=num_workers,
                                   pin_memory=True,
-                                  drop_last=True if torch.cuda.device_count() >=4 else False,
-                                  collate_fn=my_collate)
-    test_dataloader = DataLoader(val_dataset,
+                                  # drop_last=True if torch.cuda.device_count() >=4 else False,
+                                  collate_fn=my_collate,
+                                  # sampler=torch.utils.data.SubsetRandomSampler(indices)
+                                  )
+    val_dataloader = DataLoader(val_dataset,
                                 batch_size=args.bs,
                                 shuffle=True, num_workers=num_workers,
                                 pin_memory=True,
-                                drop_last=True if torch.cuda.device_count() >= 4 else False,
+                                # drop_last=True if torch.cuda.device_count() >= 4 else False,
                                  collate_fn=my_collate)
 
-    if args.SGD:
-        print('using SGD')
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
-    else:
-
-        print('using AdamW')
-        optimizer = optim.AdamW(filter(lambda  p: p.requires_grad,model.parameters()),
-                                lr=args.lr,
-                                betas=(0.9, 0.99),
-                                weight_decay=0
-                                # ,weight_decay=args.weight_decay
-                                )
+    optimizer = optim.AdamW(model.parameters(),
+                            lr=3e-3,
+                            betas=(0.9, 0.99),
+                            # weight_decay=0
+                            # ,weight_decay=args.weight_decay
+                            )
 
 
 
@@ -124,17 +123,19 @@ def main():
     train_loss_list = []
     test_loss_list = []
     current_epoch = 0
-    epoch_save = 20
+    epoch_save = 5
+    global item
+    item = next(iter(train_dataloader))
     for epoch in range(current_epoch + 1, args.epochs + 1):
         print(f"==================epoch :{epoch}/{args.epochs}===============================================")
 
         train_loss = train(train_dataloader, model, criterion, optimizer, epoch=epoch)
-        test_loss = eval(test_dataloader, model, criterion, epoch, illustration=False)
-
-        # scheduler.step(test_loss)
-        scheduler.step()
+        val_loss = eval(val_dataloader, model, criterion, epoch, illustration=False)
+        # val_loss=0
+        # scheduler.step(val_loss)
+        # scheduler.step()
         train_loss_list.append(train_loss)
-        test_loss_list.append(test_loss)
+        test_loss_list.append(val_loss)
         if epoch % epoch_save == 0:
             checkpoint_path = os.path.join(ckpt_path, f'model_epoch_{epoch}.pth')
             print(checkpoint_path)
@@ -143,10 +144,10 @@ def main():
                         'model_state_dict': model.state_dict()
                         },
                        checkpoint_path)
-            eval(test_dataloader, model, criterion, epoch, illustration=True)
+            eval(val_dataloader, model, criterion, epoch, illustration=True)
 
-        experiment.log_metrics({"test_loss": test_loss, "train_loss": train_loss}, step=epoch)
-        print(f'train loss: {train_loss:.8f} | test loss:{test_loss:.8f}')
+        experiment.log_metrics({"val_loss": val_loss, "train_loss": train_loss}, step=epoch)
+        print(f'train loss: {train_loss:.8f} | test loss:{val_loss:.8f}')
 
 
 def train(train_dataloader, model, criterion, optimizer,epoch):
@@ -155,17 +156,19 @@ def train(train_dataloader, model, criterion, optimizer,epoch):
     total_f1=0
 
     len_dataset = len(train_dataloader.dataset)
-    for i, data in enumerate(train_dataloader, start=1):
-        frame, all_bboxes, img_path,mask,labels = data
+    num_batches=len(train_dataloader)
+    for item in train_dataloader:
+        input, all_bboxes, current_path, mask, labels = item
+        # frame, all_bboxes, img_path, mask, labels = item
         # print(f'file path: {img_path}')
         # print(f'previous_frames:{previous_frames.shape}, cur_frame: {current_frame.shape}')
-        frame=frame.to(device)
+        input=input.to(device)
         mask=mask.to(device)
 
         #forward
-        output, decoder_feautre,contribution = model(frame)
+        output = model(input)
         # print(f'sum of mask: {mask.sum()}, sum of outputs: {output.sum()}')
-        del frame
+        del input
 
         # loss and acc
         loss = criterion(output, mask,labels,all_bboxes)
@@ -173,29 +176,43 @@ def train(train_dataloader, model, criterion, optimizer,epoch):
         # acc, f1, conf_matrix = cal_acc_f1(outputs, nao_bbox)
 
 
-        del output, decoder_feautre
+        del output
 
         # backward
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         train_losses += loss.item()
-    return train_losses / len_dataset
+    return train_losses / num_batches
     # return train_losses
 
 def eval(test_dataloader, model, criterion, epoch, illustration):
+    if illustration:
+        saved_path = os.path.join(args.exp_path,
+                                  args.dataset,
+                                  args.exp_name,
+                                  'top_1_correct')
+        os.system(f'rm -r {saved_path}')
+        os.system(f'mkdir {saved_path}')
+        saved_path = os.path.join(args.exp_path,
+                                  args.dataset,
+                                  args.exp_name,
+                                  'top_1_wrong')
+        os.system(f'rm -r {saved_path}')
+        os.system(f'mkdir {saved_path}')
     model.eval()
     total_test_loss = 0
     len_dataset = len(test_dataloader.dataset)
+    num_batches=len(test_dataloader)
     top_1_all=0
     top_3_all=0
     with torch.no_grad():
-        for i, data in enumerate(test_dataloader):
+        for idx, data in enumerate(test_dataloader):
             frame,all_bboxes, img_path,mask,labels = data
             frame=frame.to(device)
             mask=mask.to(device)
 
-            output, decoder_feautre,contributions = model(frame)
+            output= model(frame)
             del frame
 
 
@@ -224,19 +241,22 @@ def eval(test_dataloader, model, criterion, epoch, illustration):
                     output_item=output_item.cpu().detach().numpy().astype(np.uint8)
                     output_item=output_item*mask
                     output_item=cv2.applyColorMap(output_item,cv2.COLORMAP_JET)
-                    masked_img=cv2.addWeighted(original_image,0.7,output_item,0.3,0)
+                    masked_img=cv2.addWeighted(original_image,0.0,output_item,1.0,0)
                     saved_img=np.concatenate((original_image,masked_img),axis=1)
                     if top_1 == 1:
-                        saved_path = os.path.join(f'/cluster/home/luohwu/experiments/{args.dataset}/ambiguity/top_1_correct/',
-                                                  img_path_item[-25:].replace('/', f'_{epoch}'))
+                        saved_path = os.path.join(args.exp_path,
+                                                  args.dataset,
+                                                  args.exp_name,
+                                                  'top_1_correct',img_path_item[-25:].replace('/', f'_{epoch}'))
                     else:
-                        saved_path = os.path.join(f'/cluster/home/luohwu/experiments/{args.dataset}/ambiguity/top_1_wrong/',
-                                                  img_path_item[-25:].replace('/', f'_{epoch}')) # print(saved_path)
+                        saved_path = os.path.join(args.exp_path,
+                                                  args.dataset,
+                                                  args.exp_name,
+                                                  'top_1_wrong',img_path_item[-25:].replace('/', f'_{epoch}'))
                     cv2.imwrite(saved_path,saved_img)
 
 
-        test_loss_avg = total_test_loss / len_dataset
-    print(f'[epoch {epoch}], [test loss {test_loss_avg:5f}] ')
+        test_loss_avg = total_test_loss / num_batches
     if illustration==True:
         print(f'top-1: {top_1_all / len_dataset}, top-3: {top_3_all / len_dataset}')
 

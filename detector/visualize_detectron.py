@@ -67,9 +67,9 @@ if __name__ == '__main__':
     #     tar.extractall(os.environ['TMPDIR'])
     #     tar.close()
     #     print('finished')
-    data=make_sequence_dataset('all', 'EGO4D')
-    print(type(data))
-    print(data)
+    # data=make_sequence_dataset('all', 'EGO4D')
+    # print(type(data))
+    # print(data)
     classes = args.noun_categories
     num_cls=len(classes)
     # classes = data['class'].unique()
@@ -88,7 +88,7 @@ if __name__ == '__main__':
     cfg.DATASETS.TEST = ()
     # Number of data loading threads
     cfg.DATALOADER.NUM_WORKERS = 2
-    cfg.MODEL.WEIGHTS = os.path.join( f"../output/model_0024999.pth")   # Let training initialize from model zoo
+    cfg.MODEL.WEIGHTS = os.path.join( f"../output_all/model_0024999.pth")   # Let training initialize from model zoo
     # cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
     # Number of images per batch across all machines.
     cfg.SOLVER.IMS_PER_BATCH = 4

@@ -51,13 +51,15 @@ def extract_nao_annotations():
         df[['noun','verb']]=df.apply(determined_noun,noun_map=noun_categoreis,verb_map=verb_categoreis,axis=1,result_type='expand')
         df[['nao_bbox','contact_frame']]=df.apply(determined_nao_bbox,video_info=video_metadata[video_id],axis=1,result_type='expand')
         df['contact_frame']=df.apply(lambda row: row['contact_frame']+row['clip_frame'],axis=1)
+        helper=[*range(-72,3,3)]
+        df['all_frame']=df.apply(lambda row: [max(1,row['clip_frame']+entry) for entry in helper],axis=1)
         df.to_csv(f"{out_path}/nao_annotations/{clip_id}.csv",index=False)
 
       #record each clip's split
-      if not args.euler:
+      if not args.euler and not args.ait:
         textfile = open(f"/media/luohwu/T7/dataset/EGO4D/{split}_clips.txt", "w")
       else:
-        textfile = open(f"/cluster/work/hilliges/luohwu/nobackup/training/dataset/EGO4D/{split}_clips.txt", "w")
+        textfile = open(f"/data/luohwu/dataset/EGO4D/{split}_clips.txt", "w")
       for element in clip_ids:
         textfile.write(element + "\n")
       textfile.close()
@@ -105,13 +107,15 @@ if __name__=='__main__':
   parser = argparse.ArgumentParser(description='extract frames from clips')
   parser.add_argument('--euler', default=False, action='store_true',
                       help='use euler cluster or not')
+  parser.add_argument('--ait', default=False, action='store_true',
+                      help='use euler cluster or not')
   args = parser.parse_args()
-  if args.euler == False:
+  if args.ait == False:
     data_folder_path = '/media/luohwu/T7/ego4d'
     out_path = '/media/luohwu/T7/dataset/EGO4D'
   else:
-    data_folder_path = '/cluster/work/hilliges/luohwu/nobackup/EGO4D_inital_data'
-    out_path = '/cluster/work/hilliges/luohwu/nobackup/training/dataset/EGO4D'
+    data_folder_path = '/data/luohwu/ego4d_data/'
+    out_path = '/data/luohwu/dataset/EGO4D'
 
 
   extract_video_metadata()

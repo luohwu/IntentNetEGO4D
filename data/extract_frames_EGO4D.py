@@ -5,7 +5,7 @@ import pandas as pd
 import cv2
 import argparse
 
-
+from ast import literal_eval
 
 def extract_frames_from_video(annotation_path,output_path,video_path,base_only):
     clip_ids=[f[:-4] for f in os.listdir(annotation_path) if os.path.isfile(os.path.join(annotation_path,f))]
@@ -20,8 +20,9 @@ def extract_frames_from_video(annotation_path,output_path,video_path,base_only):
             os.mkdir(output_folder)
 
         # read annotations and prepare needed frames
-        annotations=pd.read_csv(os.path.join(annotation_path,f'{clip_id}.csv'))
-        frame=annotations['clip_frame'].tolist()
+        annotations=pd.read_csv(os.path.join(annotation_path,f'{clip_id}.csv'),converters={'all_frame':literal_eval})
+        frame=annotations['all_frame'].tolist()
+        frame=[item for block in frame for item in block]
         contract_frame=annotations['contact_frame'].tolist()
         frames_to_extract=list(set(frame+contract_frame))
         # in-place sort
@@ -45,6 +46,7 @@ def extract_frames_from_video(annotation_path,output_path,video_path,base_only):
             count+=1
             assert success, f"failed reading frame: {count} of clip {clip_id}"
             if count in frames_to_extract:
+                image=cv2.resize(image,(456,256))
                 cv2.imwrite(os.path.join(output_folder,f'frame_{str(count).zfill(10)}.jpg'),image)
                 if count==frames_to_extract[-1]:
                     vidcap.release()
@@ -54,10 +56,10 @@ def extract_frames_from_video(annotation_path,output_path,video_path,base_only):
     print(unavailable_clips)
 
 
-    if not args.euler:
+    if not args.ait:
         textfile = open("/media/luohwu/T7/ego4d/v1/missing_clips.txt", "w")
     else:
-        textfile = open("/cluster/work/hilliges/luohwu/nobackup/training/dataset/EGO4D/missing_clips.txt", "w")
+        textfile = open("/data/luohwu/dataset/EGO4D/missing_clips.txt", "w")
     for element in unavailable_clips:
         textfile.write(element + "\n")
     textfile.close()
@@ -67,18 +69,18 @@ def extract_frames_from_video(annotation_path,output_path,video_path,base_only):
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='extract frames from clips')
-    parser.add_argument('--euler',default=False,action='store_true',
+    parser.add_argument('--ait',default=False,action='store_true',
                         help='use euler cluster or not')
     args=parser.parse_args()
-    if not args.euler:
-        extract_frames_from_video(annotation_path='/media/luohwu/T7/dataset/EGO4D/nao_annotations',
-                                  output_path='/media/luohwu/T7/dataset/EGO4D/rgb_frames',
+    if not args.ait:
+        extract_frames_from_video(annotation_path='/home/luohwu/ait-data/dataset/EGO4D/nao_annotations',
+                                  output_path='/home/luohwu/ait-data/dataset/EGO4D/rgb_frames',
                                   video_path='/media/luohwu/T7/ego4d/v1/clips',
                                   base_only=True)
     else:
-        extract_frames_from_video(annotation_path='/cluster/work/hilliges/luohwu/nobackup/training/dataset/EGO4D/nao_annotations',
-                                  output_path='/cluster/work/hilliges/luohwu/nobackup/training/dataset/EGO4D/rgb_frames',
-                                  video_path='/cluster/work/hilliges/luohwu/nobackup/EGO4D_inital_data/v1/clips',
+        extract_frames_from_video(annotation_path='/data/luohwu/dataset/EGO4D/nao_annotations',
+                                  output_path='/data/luohwu/dataset/EGO4D/rgb_frames',
+                                  video_path='/data/luohwu/ego4d_data/v1/clips',
                                   base_only=True)
 
 

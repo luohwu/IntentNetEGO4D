@@ -52,7 +52,9 @@ def make_sequence_dataset_for_eval(mode='train',dataset_name='EGO4D'):
                                              "cls":literal_eval,
                                              "ro_bbox":literal_eval,
                                              "noun":literal_eval,
-                                             "scores":literal_eval}
+                                             "scores":literal_eval,
+                                             # "interaction_scores":literal_eval
+                                             }
                                 )
             annos['img_path']=img_path
             annos['cls']=annos.apply(lambda row:[args.noun_categories[item] for item in row['cls']],axis=1)
