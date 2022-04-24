@@ -59,9 +59,13 @@ def main():
         param.requires_grad = True
 
     train_dataset = NAODatasetClip(mode='train', dataset_name=args.dataset)
-    # indices = torch.randperm(len(train_dataset))[:32*5].tolist()
-    # train_dataset = torch.utils.data.Subset(train_dataset, indices)
+
     val_dataset = NAODatasetClip(mode='val', dataset_name=args.dataset)
+
+    # indices = torch.randperm(len(train_dataset))[:512].tolist()
+    # train_dataset = torch.utils.data.Subset(train_dataset, indices)
+    # val_dataset=train_dataset
+
     print(f'length of train_dataset: {len(train_dataset)}')
     print(f'length of val_dataset: {len(val_dataset)}')
 
@@ -85,8 +89,13 @@ def main():
                                 # drop_last=True if torch.cuda.device_count() >= 4 else False,
                                  collate_fn=my_collate)
 
-    optimizer = optim.AdamW(model.parameters(),
-                            lr=3e-3,
+    param_backbone=[]
+    param_backbone.extend(model.module.backbone.parameters())
+    param_main=[p for p in model.module.parameters() if p not in set(param_backbone)]
+
+    optimizer = optim.AdamW([{'params':param_backbone,'lr':8e-6},
+                             {'params':param_main}],
+                            lr=3e-4,
                             betas=(0.9, 0.99),
                             # weight_decay=0
                             # ,weight_decay=args.weight_decay
@@ -95,18 +104,18 @@ def main():
 
 
 
-    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,
-    #                                                  mode='min',
-    #                                                  factor=0.8,
-    #                                                  patience=3,
-    #                                                  verbose=True,
-    #                                                  min_lr=0.000001)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+                                                     mode='min',
+                                                     factor=0.8,
+                                                     patience=3,
+                                                     verbose=True,
+                                                     min_lr=0.000001)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=100, eta_min=4e-5,verbose=True)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,T_max=25,eta_min=1e-5,verbose=True)
     # scheduler=torch.optim.lr_scheduler.ExponentialLR(optimizer,gamma=0.98,verbose=False)
     # scheduler=CosExpoScheduler(optimizer,switch_step=100,eta_min=4e-5,gamma=0.995,min_lr=1e-6)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=100,T_mult=2, eta_min=4e-5, verbose=True)
-    scheduler=DecayCosinWarmRestars(optimizer,T_0=100,T_mult=2,eta_min=4e-5,decay_rate=0.5,verbose=True)
+    # scheduler=DecayCosinWarmRestars(optimizer,T_0=100,T_mult=2,eta_min=4e-5,decay_rate=0.5,verbose=True)
     """"
     Heatmap version
     """
@@ -123,12 +132,11 @@ def main():
     train_loss_list = []
     test_loss_list = []
     current_epoch = 0
-    epoch_save = 5
+    epoch_save = 10
     global item
     item = next(iter(train_dataloader))
     for epoch in range(current_epoch + 1, args.epochs + 1):
         print(f"==================epoch :{epoch}/{args.epochs}===============================================")
-
         train_loss = train(train_dataloader, model, criterion, optimizer, epoch=epoch)
         val_loss = eval(val_dataloader, model, criterion, epoch, illustration=False)
         # val_loss=0
@@ -158,17 +166,19 @@ def train(train_dataloader, model, criterion, optimizer,epoch):
     len_dataset = len(train_dataloader.dataset)
     num_batches=len(train_dataloader)
     for item in train_dataloader:
-        input, all_bboxes, current_path, mask, labels = item
+        past_frames,current_frame, all_bboxes, current_path, mask, labels = item
         # frame, all_bboxes, img_path, mask, labels = item
         # print(f'file path: {img_path}')
         # print(f'previous_frames:{previous_frames.shape}, cur_frame: {current_frame.shape}')
-        input=input.to(device)
+        past_frames=past_frames.to(device)
+
+        current_frame = current_frame.to(device)
         mask=mask.to(device)
 
         #forward
-        output = model(input)
+        output,decoder_feature,contributions = model(current_frame,past_frames)
         # print(f'sum of mask: {mask.sum()}, sum of outputs: {output.sum()}')
-        del input
+        del current_frame,past_frames
 
         # loss and acc
         loss = criterion(output, mask,labels,all_bboxes)
@@ -200,6 +210,7 @@ def eval(test_dataloader, model, criterion, epoch, illustration):
                                   'top_1_wrong')
         os.system(f'rm -r {saved_path}')
         os.system(f'mkdir {saved_path}')
+        print(saved_path)
     model.eval()
     total_test_loss = 0
     len_dataset = len(test_dataloader.dataset)
@@ -208,12 +219,13 @@ def eval(test_dataloader, model, criterion, epoch, illustration):
     top_3_all=0
     with torch.no_grad():
         for idx, data in enumerate(test_dataloader):
-            frame,all_bboxes, img_path,mask,labels = data
-            frame=frame.to(device)
+            past_frames,current_frame,all_bboxes, img_path,mask,labels = data
+            past_frames=past_frames.to(device)
+            current_frame=current_frame.to(device)
             mask=mask.to(device)
 
-            output= model(frame)
-            del frame
+            output,decoder_feature,contributions= model(current_frame,past_frames)
+            del current_frame,past_frames
 
 
             loss = criterion(output, mask,labels,all_bboxes)

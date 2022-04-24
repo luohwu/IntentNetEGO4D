@@ -53,7 +53,7 @@ def make_sequence_dataset_for_eval(mode='train',dataset_name='EGO4D'):
                                              "ro_bbox":literal_eval,
                                              "noun":literal_eval,
                                              "scores":literal_eval,
-                                             "interaction_scores":literal_eval
+                                             # "interaction_scores":literal_eval
                                              }
                                 )
             annos['img_path']=img_path
@@ -61,7 +61,7 @@ def make_sequence_dataset_for_eval(mode='train',dataset_name='EGO4D'):
             annos['nao_bbox']=annos.apply(unnormalize_bbox,axis=1)
 
             if not annos.empty:
-                annos_subset = annos[['uid', 'nao_bbox','noun','objects', 'clip_frame','ro_bbox','cls','scores','interaction_scores']]
+                annos_subset = annos[['uid', 'nao_bbox','noun','objects', 'clip_frame','ro_bbox','cls','scores']]
                 df_items = df_items.append(annos_subset)
 
 
@@ -83,12 +83,10 @@ def compute_topK_result(item,k=5):
     num_gt=len(item['noun'])
     num_pred=len(item['cls'])
     quota=(k)*num_gt
-    idx=sorted(range(num_pred),key=lambda k:-item['interaction_scores'][k])
+    idx=sorted(range(num_pred),key=lambda k:-item['scores'][k])
     item['ro_bbox']=[item['ro_bbox'][i] for i in idx]
     item['scores'] = [item['scores'][i] for i in idx]
     item['cls'] = [item['cls'][i] for i in idx]
-    item['interaction_scores'] = [item['interaction_scores'][i] for i in idx]
-    # print(item['interaction_scores'])
     result_ro_bbox = []
     result_scores = []
     result_cls = []
@@ -103,11 +101,11 @@ def compute_topK_result(item,k=5):
                     if iou>0.5 and len(result_cls)<1:
                         result_ro_bbox.append(item['ro_bbox'][i])
                         result_cls.append(item['cls'][i])
-                        result_scores.append(item['interaction_scores'][i])
-            # else:
-            #     result_ro_bbox.append(item['ro_bbox'][i])
-            #     result_cls.append(item['cls'][i])
-            #     result_scores.append(item['scores'][i])
+                        result_scores.append(item['scores'][i])
+            else:
+                result_ro_bbox.append(item['ro_bbox'][i])
+                result_cls.append(item['cls'][i])
+                result_scores.append(item['scores'][i])
     else:
         # return item
         gt_label=item['noun']
@@ -120,15 +118,15 @@ def compute_topK_result(item,k=5):
                     if iou>0.5 and check_no_overlap(item['ro_bbox'][i],result_ro_bbox):
                         result_ro_bbox.append(item['ro_bbox'][i])
                         result_cls.append(item['cls'][i])
-                        result_scores.append(item['interaction_scores'][i])
-            # else:
-            #     result_ro_bbox.append(item['ro_bbox'][i])
-            #     result_cls.append(item['cls'][i])
-            #     result_scores.append(item['scores'][i])
+                        result_scores.append(item['scores'][i])
+            else:
+                result_ro_bbox.append(item['ro_bbox'][i])
+                result_cls.append(item['cls'][i])
+                result_scores.append(item['scores'][i])
 
     item['ro_bbox'] = result_ro_bbox
     item['cls'] = result_cls
-    item['interaction_scores'] = result_scores
+    item['scores'] = result_scores
 
     return item
 
@@ -141,7 +139,7 @@ if __name__=='__main__':
         print(f'{i}/{length}')
         item=data.iloc[i,:].copy()
         # print(item)
-        item=compute_topK_result(item,5)
+        item=compute_topK_result(item,3)
         # print(item)
         #write gt
         gt_file=os.path.join(args.data_path,'map_input','ground-truth',f"{item['uid']}.txt")
@@ -153,5 +151,5 @@ if __name__=='__main__':
         # write prediction
         with open(pred_file,'w') as f:
             for idx_bbox,bbox in enumerate(item['ro_bbox']):
-                f.write(f"{item['cls'][idx_bbox]} {item['interaction_scores'][idx_bbox]} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}\n")
+                f.write(f"{item['cls'][idx_bbox]} {item['scores'][idx_bbox]} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}\n")
             f.close()

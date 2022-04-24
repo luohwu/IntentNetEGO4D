@@ -7,19 +7,21 @@ sys.path.insert(0,'..')
 
 import cv2
 import torch
+import torchvision.transforms.transforms
 from torch import nn
 from torchvision import models
 import torch.nn.functional as F
 from opt import *
-# from model.IntentNetAmbiguity  import *
-from backbone.DPC import DPC_RNN
-
+from model.IntentNetAmbiguity  import *
+from data.dataset_ambiguity import generate_mask
 p_dropout=0.2
 
 
 import gensim.downloader
 
 import kornia
+from backbone.DPC import DPC_RNN
+
 
 
 def load_backbone_state(model):
@@ -32,114 +34,70 @@ def load_backbone_state(model):
     model.load_state_dict(state_dict_normal)
     return model
 
-class ConvBlock(nn.Module):
-    def __init__(self,in_c,out_c,padding=1):
-        super(ConvBlock, self).__init__()
-        self.model=nn.Sequential(
-            nn.Conv2d(in_c,out_c,kernel_size=3,padding=padding),
-            # nn.BatchNorm2d(out_c),
-            nn.Dropout2d(p_dropout),
-            nn.ReLU(),
-            nn.Conv2d(out_c,out_c,kernel_size=3,padding=padding),
-            nn.BatchNorm2d(out_c),
-        )
-
-    def forward(self,x):
-        return self.model(x)
-
-
-class Decoder(nn.Module):
-    def __init__(self,channels=[256,128, 64, 32]):
-        super(Decoder, self).__init__()
-        self.channels=channels
-        self.up_block_list=nn.ModuleList([nn.ConvTranspose2d(256,128,kernel_size=(4,4),stride=(4,4),padding=(0,1)),
-                                          nn.ConvTranspose2d(128,64,kernel_size=(4,4),stride=(4,4),padding=(0,2)),
-                                          nn.ConvTranspose2d(64,32,kernel_size=(2,4),stride=(2,4),padding=(0,4))
-                                          ])
-        self.conv_block_list=nn.ModuleList([
-            ConvBlock(self.channels[i],self.channels[i]) for i in range(len(channels))
-        ])
-        self.dropout=nn.Dropout2d(p_dropout)
-
-    def forward(self,x):
-        for i in range(len(self.channels)-1):
-            x = self.conv_block_list[i](x)
-            x = self.dropout(x)
-            x=  self.up_block_list[i](x)
-        x=self.conv_block_list[-1](x)
-        return x
-
-
-
-
-class IntentNetClipWord2VecSoftmax(nn.Module):
-    def __init__(self):
-        super(IntentNetClipWord2VecSoftmax, self).__init__()
-        self.backbone=DPC_RNN(sample_size=128,num_seq=5,seq_len=5,pred_step=0,network='resnet18')
-        self.backbone=load_backbone_state(self.backbone)
-        self.decoder=Decoder(channels=[256,128,64,32])
-        self.compute_contribution=nn.Sequential(
-            nn.Linear(256,128),
-            nn.ReLU(),
-            nn.Linear(128,32),
-        )
-        self.head=nn.Conv2d(32,2,kernel_size=1)
-        self._initialize_weights(self.decoder)
-
-
-
-    def forward(self,x):
-        clip_context=self.backbone(x)
-        clip_context_pooled=F.adaptive_avg_pool2d(clip_context,output_size=(1,1)).squeeze(-1).squeeze(-1)
-        contribution=self.compute_contribution(clip_context_pooled) # B,C
-        decoder_feature=self.decoder(clip_context)
-        binary_feature=self.head(decoder_feature)
-        p=torch.softmax(binary_feature,dim=1)
-        return p[:,0].squeeze(1)
-
-
-    def _initialize_weights(self, module):
-        for name, param in module.named_parameters():
-            if 'bias' in name:
-                nn.init.constant_(param, 0.0)
-            elif 'weight' in name and param.ndimension()>1:
-                nn.init.orthogonal_(param, 1)
-        # other resnet weights have been initialized in resnet itself
-
 class IntentNetClipWord2Vec(nn.Module):
     def __init__(self):
         super(IntentNetClipWord2Vec, self).__init__()
+        self.encoder=Encoder(in_channel=3,out_channels=[64,128,256,512])
+        self.decoder=Decoder(in_channel=512,out_channels=[256,128,64])
+        self.head=nn.Sequential(
+            nn.Sigmoid(),
+            # nn.Tanh(),
+        )
+        map=torch.ones(1,64,256,456)*0.001
+        for i in range(8):
+            for j in range(8):
+                map[0,i+j*8,i*32:(i+1)*32,j*57:(j+1)*57]=50
+        map=kornia.filters.gaussian_blur2d(map,(171,171),(100.5,100.5))
+        for i in range(64):
+            cv2.imwrite(f'{args.exp_path}/draft/0_map/{i}.jpg',map[0,i].numpy()*255)
+        # self.map=map.to(device)
+        self.map=map
+
+        self.contribution = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+        )
+
+        # self.contribution_old = nn.Sequential(
+        #     nn.AdaptiveAvgPool2d((1, 1)),
+        #     nn.Flatten(1),
+        #     nn.Linear(512,64),
+        #     # nn.Dropout(p_dropout),
+        #     nn.ReLU(),
+        #     nn.Linear(64,64),
+        #     nn.ReLU(),
+        # )
+
         self.backbone=DPC_RNN(sample_size=128,num_seq=5,seq_len=5,pred_step=0,network='resnet18')
         self.backbone=load_backbone_state(self.backbone)
-        self.decoder=Decoder(channels=[256,128,64,32])
-        self.compute_contribution=nn.Sequential(
-            nn.Linear(256,128),
-            nn.ReLU(),
-            nn.Linear(128,32),
-        )
-        self._initialize_weights(self.decoder)
+        # self.backbone=nn.DataParallel(self.backbone).to(device)
+        # for param in self.backbone.module.parameters():
+        #     param.requires_grad=False
 
+    def forward(self,x,past_frames):
+        encoder_features=self.encoder(x)
+        feature_last_layer=encoder_features[-1]
+        decoder_feature=self.decoder(feature_last_layer,encoder_features[:-1][::-1])
+        # decoder_feature=F.softmax(decoder_feature.view(-1,64,116736),dim=2).view_as(decoder_feature)
+        decoder_feature=F.layer_norm(decoder_feature,[256,456])
+        decoder_feature=decoder_feature*self.map.to(decoder_feature.device)
+        # decoder_feature=F.sigmoid(decoder_feature)
+        context=self.backbone(past_frames)
+        contributions=self.contribution(context)
 
+        # contributions = self.contribution_old(feature_last_layer)
 
-    def forward(self,x):
-        clip_context=self.backbone(x)
-        clip_context_pooled=F.adaptive_avg_pool2d(clip_context,output_size=(1,1)).squeeze(-1).squeeze(-1)
-        contribution=self.compute_contribution(clip_context_pooled) # B,C
-        decoder_feature=self.decoder(clip_context)
-        output = (decoder_feature*contribution.view(-1,32,1,1)).sum(1)
-        return F.sigmoid(output)
-
-    def _initialize_weights(self, module):
-        for name, param in module.named_parameters():
-            if 'bias' in name:
-                nn.init.constant_(param, 0.0)
-            elif 'weight' in name and param.ndimension()>1:
-                nn.init.orthogonal_(param, 1)
-        # other resnet weights have been initialized in resnet itself
+        # contributions_normalized=torch.softmax(contributions,dim=(1))
+        output = self.head((decoder_feature*contributions.view(-1,64,1,1)).sum(1))
+        return output,decoder_feature,contributions
 
 
 glove_vectors = gensim.downloader.load('glove-twitter-25')
-
+import numpy as np
 class AttentionLossWord2Vec(nn.Module):
     def __init__(self):
         super(AttentionLossWord2Vec, self).__init__()
@@ -148,21 +106,36 @@ class AttentionLossWord2Vec(nn.Module):
     def forward(self,outputs,targets,labels,bboxes):
 
         B,H,W=outputs.shape
-        weight_masks=torch.ones(B,H,W,requires_grad=False)*0.8
+        weight_masks=torch.zeros(B,H,W,requires_grad=False)*0.8
         weight_masks=weight_masks.to(outputs.device)
         with torch.no_grad():
             for i in range(B):
                 nao_label=labels[i][0]
-                ro_bbox = bboxes[i][1:]
+                ro_bbox = bboxes[i][:]
                 for j,box in enumerate(ro_bbox):
                     # print(box)
                     ro_label=labels[i][j]
                     similarity=compute_similarity(nao_label,ro_label)
                     # print(cos_similarity)
-                    # weight_masks[i,box[1]:box[3], box[0]:box[2]] += torch.tensor(similarity)
-                    weight_masks[i, box[1]:box[3], box[0]:box[2]] += torch.tensor(similarity) / 3.
+                    # weight_masks[i,box[1]:box[3], box[0]:box[2]] += torch.tensor(similarity)/3
+
+                    if j==0:
+                        weight_masks[i, box[1]:box[3], box[0]:box[2]] =1
+                    else:
+
+                        weight_masks[i, box[1]:box[3], box[0]:box[2]] = torch.max(
+                            weight_masks[i, box[1]:box[3], box[0]:box[2]],
+                            similarity * torch.ones_like(weight_masks[i, box[1]:box[3], box[0]:box[2]]))
+            weight_masks[weight_masks==0]=0.8
 
         pixel_wise_loss=self.BCE(outputs,targets)*weight_masks
+        # weight_masks=weight_masks[0]*255
+        # weight_masks = weight_masks.cpu().detach().numpy().astype(np.uint8)
+        # weight_masks=cv2.applyColorMap(weight_masks,cv2.COLORMAP_JET)
+        # cv2.imwrite('/data/luohwu/experiments/EGO4D/clip/weight.png',weight_masks)
+        # targets=targets[0].cpu().detach().numpy()*255
+        #
+        # cv2.imwrite('/data/luohwu/experiments/EGO4D/clip/targets.png',targets)
         return pixel_wise_loss.mean()
 
 def calibrate_label(label):
@@ -176,6 +149,20 @@ def compute_similarity(nao_label,ro_label):
     return glove_vectors.similarity(calibrate_label(nao_label),calibrate_label(ro_label))
 
 
+
+def main_simple():
+    model=IntentNetClipWord2Vec()
+
+    model=nn.DataParallel(model).to(device)
+    # for param in model.module.parameters():
+    #     if param in model.module.backbone.parameters():
+    #         print('yes')
+    #     else:
+    #         print('no')
+    past_frames=torch.randn(4,5,3,5,128,128).to(device)
+    current_frame=torch.randn(4,3,256,456).to(past_frames.device)
+    output,decoder_feature,contributions=model(x=current_frame,past_frames=past_frames)
+    print(output.shape)
 
 
 
@@ -226,7 +213,7 @@ def main():
 
     for i in range(epoch):
         for item in train_dataloader:
-            input, all_bboxes, current_path, target, labels = item
+            past_frames,current_frame, all_bboxes, current_path, target, labels = item
             input=input.to(device)
             target=target.to(device)
             output= model(input)
@@ -265,4 +252,4 @@ if __name__=='__main__':
             project_name="intentnetego4d_clip",
             workspace="thesisproject",
         )
-    main()
+    main_simple()

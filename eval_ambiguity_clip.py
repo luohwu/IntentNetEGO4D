@@ -4,7 +4,7 @@ from comet_ml import Experiment
 from datetime import datetime
 import matplotlib.pyplot as plt
 import torch.cuda
-
+import time
 from opt import *
 import tarfile
 from torch import  nn
@@ -12,17 +12,16 @@ import pandas as pd
 import cv2
 import numpy as np
 from tools.Schedulers import *
-from data.dataset_ambiguity import NAODatasetBase,my_collate
-from model.IntentNetAmbiguity import *
-from model.IntentNetAmbiguityWord2Vec import *
-import  model.IntentNetAmbiguityWord2Vec
+from data.dataset_ambiguity_clip import NAODatasetClip,my_collate
+from model.IntentNetAmbiguityClip import *
 from ast import literal_eval
 from PIL import Image
 from torchvision import transforms
-if args.euler:
+from utils.augmentation import *
+if args.ait:
     experiment = Experiment(
         api_key="wU5pp8GwSDAcedNSr68JtvCpk",
-        project_name="intentnetego4d",
+        project_name="intentnetego4d_clip",
         workspace="thesisproject",
     )
     experiment.log_parameters(args.__dict__)
@@ -33,6 +32,10 @@ torch.cuda.manual_seed(SEED)
 exp_name = args.exp_name
 
 TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.now())
+def pil_loader(path):
+    with open(path, 'rb') as f:
+        with Image.open(f) as img:
+            return img.convert('RGB')
 
 
 multi_gpu = True if torch.cuda.device_count() > 1 else False
@@ -41,28 +44,52 @@ print('current graphics card is:')
 os.system('lspci | grep VGA')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-transform=transforms.Compose([
-    transforms.ToTensor()
+transform_current_frame=transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225])  # ImageNet
 ])
-def add_interaction_scores(row,clip_id,model):
-    img_path = os.path.join(args.frames_path, clip_id,f"frame_{str(row['clip_frame']).zfill(10)}.jpg")
-    image=Image.open(img_path)
-    input=transform(image)
-    input=input.to(device)
-    input=input.unsqueeze(0)
-    output, decoder_feautre, contribution = model(input)
+transform_past_frames = transforms.Compose([
+    # RandomSizedCrop(size=128, consistent=True, p=1.0),
+    RandomHorizontalFlip(consistent=True),
+    Scale(size=(128, 128)),
+    RandomGray(consistent=False, p=0.5),
+    ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=0.5),
+    ToTensor(),
+    Normalize()
+])
+def add_interaction_scores(row,clip_id):
+    img_path = os.path.join(args.frames_path, clip_id)
+    frame_indices = row['all_frame']
+    pil_images_list = [pil_loader(os.path.join(img_path, f'frame_{str(idx).zfill(10)}.jpg')) for idx in
+                       frame_indices]
+    past_images_list = transform_past_frames(pil_images_list)
+    (C, H, W) = past_images_list[0].size()
+    past_frames = torch.stack(past_images_list, 0)
+    past_frames = past_frames.view(5, 5, C, H, W).transpose(1, 2)
+    del past_images_list
+
+    current_frame_path = os.path.join(img_path, f"frame_{str(row['clip_frame']).zfill(10)}.jpg")
+    current_frame = Image.open(current_frame_path)
+    current_frame = transform_current_frame(current_frame)
+    past_frames=past_frames.unsqueeze(0).to(device)
+    current_frame=current_frame.unsqueeze(0).to(device)
+    # print(f'shape of current frame: {current_frame.shape}, shape of past frames: {past_frames.shape}')
+    output, decoder_feautre, contribution = model(current_frame,past_frames)
     interaction_scores=compute_interaction_scores(output,row['ro_bbox'])
     # print(interaction_scores)
+    # time.sleep(0.1)
     return interaction_scores
 
 
 
 def main():
-    model=IntentNetBaseWord2Vec()
+    global model
+    model=IntentNetClipWord2Vec()
     model=nn.DataParallel(model)
     total_params = sum(p.numel() for p in model.parameters())
     print(f'model size: {total_params}')
-    model_path=os.path.join(args.exp_path,'EGO4D/base/ckpts/model_epoch_20.pth')
+    model_path=os.path.join(args.exp_path,'EGO4D/clip/ckpts/model_epoch_10.pth')
     print(model_path)
     model.load_state_dict(
         torch.load(model_path, map_location='cpu')[
@@ -95,9 +122,14 @@ def main():
                                               "previous_frames": literal_eval,
                                               "cls": literal_eval,
                                               "ro_bbox": literal_eval,
-                                              "noun": literal_eval}
+                                              "noun": literal_eval,
+                                              "all_frame":literal_eval}
                                 )
-            annos['interaction_scores']=annos.apply(add_interaction_scores,model=model,clip_id=clip_id,axis=1)
+            annos['interaction_scores']=[[] for r in range(len(annos))]
+            # for i in range(len(annos)):
+            #     annos.at[i,'interaction_scores']=add_interaction_scores(row=annos.iloc[i,:],clip_id=clip_id)
+            #     annos.at[i, 'interaction_scores'] = [123]
+            annos['interaction_scores']=annos.apply(add_interaction_scores,clip_id=clip_id,axis=1)
             annos.to_csv(anno_path,index=False)
 
     # df_items=df_items.rename(columns={'class':'category'})

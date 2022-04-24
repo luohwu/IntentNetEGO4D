@@ -51,9 +51,9 @@ def main():
     print(f'model size: {total_params}')
     model_path = os.path.join(args.exp_path, 'EGO4D', 'base', 'ckpts/model_epoch_120.pth')
     # model_path='/data/luohwu/experiments/EGO4D/base/ckpts/model_epoch_120.pth'
-    model.load_state_dict(
-        torch.load(model_path, map_location='cpu')[
-            'model_state_dict'])
+    # model.load_state_dict(
+    #     torch.load(model_path, map_location='cpu')[
+    #         'model_state_dict'])
 
     model = model.to(device)
 
@@ -124,7 +124,7 @@ def main():
     train_loss_list = []
     test_loss_list = []
     current_epoch = 0
-    epoch_save = 20
+    epoch_save = 10
     for epoch in range(current_epoch + 1, args.epochs + 1):
         print(f"==================epoch :{epoch}/{args.epochs}===============================================")
 
@@ -154,7 +154,7 @@ def train(train_dataloader, model, criterion, optimizer,epoch):
     total_acc=0
     total_f1=0
 
-    len_dataset = len(train_dataloader.dataset)
+    len_dataset = len(train_dataloader)
     for i, data in enumerate(train_dataloader, start=1):
         frame, all_bboxes, img_path,mask,labels = data
         # print(f'file path: {img_path}')
@@ -184,9 +184,23 @@ def train(train_dataloader, model, criterion, optimizer,epoch):
     # return train_losses
 
 def eval(test_dataloader, model, criterion, epoch, illustration):
+    if illustration:
+        saved_path = os.path.join(args.exp_path,
+                                  args.dataset,
+                                  args.exp_name,
+                                  'top_1_correct')
+        os.system(f'rm -r {saved_path}')
+        os.system(f'mkdir {saved_path}')
+        saved_path = os.path.join(args.exp_path,
+                                  args.dataset,
+                                  args.exp_name,
+                                  'top_1_wrong')
+        os.system(f'rm -r {saved_path}')
+        os.system(f'mkdir {saved_path}')
     model.eval()
     total_test_loss = 0
     len_dataset = len(test_dataloader.dataset)
+    len_dataloader = len(test_dataloader)
     top_1_all=0
     top_3_all=0
     with torch.no_grad():
@@ -224,18 +238,21 @@ def eval(test_dataloader, model, criterion, epoch, illustration):
                     output_item=output_item.cpu().detach().numpy().astype(np.uint8)
                     output_item=output_item*mask
                     output_item=cv2.applyColorMap(output_item,cv2.COLORMAP_JET)
-                    masked_img=cv2.addWeighted(original_image,0.7,output_item,0.3,0)
+                    masked_img=cv2.addWeighted(original_image,0.1,output_item,0.9,0)
                     saved_img=np.concatenate((original_image,masked_img),axis=1)
                     if top_1 == 1:
-                        saved_path = os.path.join(f'/cluster/home/luohwu/experiments/{args.dataset}/ambiguity/top_1_correct/',
-                                                  img_path_item[-25:].replace('/', f'_{epoch}'))
+                        saved_path = os.path.join(args.exp_path,
+                                                  args.dataset,
+                                                  args.exp_name,
+                                                  'top_1_correct',img_path_item[-25:].replace('/', f'_{epoch}'))
                     else:
-                        saved_path = os.path.join(f'/cluster/home/luohwu/experiments/{args.dataset}/ambiguity/top_1_wrong/',
-                                                  img_path_item[-25:].replace('/', f'_{epoch}')) # print(saved_path)
+                        saved_path = os.path.join(args.exp_path,
+                                                  args.dataset,
+                                                  args.exp_name,
+                                                  'top_1_wrong',img_path_item[-25:].replace('/', f'_{epoch}'))
                     cv2.imwrite(saved_path,saved_img)
 
-
-        test_loss_avg = total_test_loss / len_dataset
+        test_loss_avg = total_test_loss / len_dataloader
     print(f'[epoch {epoch}], [test loss {test_loss_avg:5f}] ')
     if illustration==True:
         print(f'top-1: {top_1_all / len_dataset}, top-3: {top_3_all / len_dataset}')

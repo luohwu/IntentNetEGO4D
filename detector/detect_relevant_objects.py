@@ -151,7 +151,7 @@ if __name__ == '__main__':
     # cfg.MODEL.DEVICE=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if not args.euler and not args.ait:
             cfg.MODEL.DEVICE='cpu'
-    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.35  #0.1~ 0.27 , 0.35~0.35
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.1  #0.1~ 0.27 , 0.35~0.35
     predictor = DefaultPredictor(cfg)
 
     # cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR,

@@ -85,14 +85,21 @@ class NAODatasetClip(Dataset):
         self.transform_label = transforms.ToTensor()
 
         self.data = make_sequence_dataset(mode,dataset_name)
-        self.transform=transforms.Compose([
+        self.transform_past_frames=transforms.Compose([
             # RandomSizedCrop(size=128, consistent=True, p=1.0),
             RandomHorizontalFlip(consistent=True),
             Scale(size=(128, 128)),
-            RandomGray(consistent=False, p=0.0),
-            ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=0.0),
+            RandomGray(consistent=False, p=0.5),
+            ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.25, p=0.5),
             ToTensor(),
             Normalize()
+        ])
+        self.transform_current_frame = transforms.Compose([  # [h, w]
+            # transforms.Resize(args.img_resize),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])  # ImageNet
+            # , AddGaussianNoise(0., 0.5)
         ])
 
     def __getitem__(self, item):
@@ -115,11 +122,15 @@ class NAODatasetClip(Dataset):
         frame_indices = df_item.all_frame
         pil_images_list = [pil_loader(os.path.join(df_item.img_path, f'frame_{str(idx).zfill(10)}.jpg')) for idx in
                            frame_indices]
-        tensor_images_list = self.transform(pil_images_list)
+        tensor_images_list = self.transform_past_frames(pil_images_list)
         (C, H, W) = tensor_images_list[0].size()
-        tensor_images = torch.stack(tensor_images_list, 0)
+        past_frames = torch.stack(tensor_images_list, 0)
         del tensor_images_list
-        tensor_images = tensor_images.view(self.num_blocks, self.block_len, C, H, W).transpose(1, 2)
+        past_frames = past_frames.view(self.num_blocks, self.block_len, C, H, W).transpose(1, 2)
+
+        current_frame_path = os.path.join(img_dir, f'frame_{str(df_item.clip_frame).zfill(10)}.jpg')
+        current_frame = Image.open(current_frame_path)
+        current_frame= self.transform_current_frame(current_frame)
 
         # if rand_num>0.5:
         #     current_frame = ImageOps.mirror(current_frame)
@@ -139,7 +150,7 @@ class NAODatasetClip(Dataset):
 
 
 
-        return tensor_images, all_bboxes,current_frame_path,mask,cls
+        return past_frames, current_frame, all_bboxes,current_frame_path,mask,cls
 
     def __len__(self):
         return self.data.shape[0]
@@ -150,8 +161,9 @@ def generate_mask(height,width,bboxes,cls):
     for i,box in enumerate(bboxes):
         box=[int(item) for item in box]
         area=(box[2]-box[0])*(box[3]-box[1])/(256*456.)
-        if area<0.5 :
+        if area<0.5 or i==0:
             mask[box[1]:box[3],box[0]:box[2]]=1
+
         # else:
         #     mask[box[1]:box[3], box[0]:box[2]] = 1
 
@@ -170,18 +182,20 @@ def resize_bbox(bbox,height,width,new_height,new_width):
     return new_bbox
 
 def my_collate(batch):
-    frames_list=[]
+    past_frames_list=[]
+    current_frame_list=[]
     mask_list=[]
     frame_path_list=[]
     bbox_list=[]
     cls_list=[]
     for item in batch:
-        frames_list.append(item[0])
-        bbox_list.append(item[1])    
-        frame_path_list.append(item[2])
-        mask_list.append(item[3])
-        cls_list.append(item[4])
-    return torch.stack(frames_list),bbox_list,(frame_path_list),torch.stack(mask_list),cls_list
+        past_frames_list.append(item[0])
+        current_frame_list.append(item[1])
+        bbox_list.append(item[2])
+        frame_path_list.append(item[3])
+        mask_list.append(item[4])
+        cls_list.append(item[5])
+    return torch.stack(past_frames_list),torch.stack(current_frame_list),bbox_list,(frame_path_list),torch.stack(mask_list),cls_list
 
 def main_base():
     # train_dataset,val_dataset=ini_datasets(dataset_name='ADL',original_split=False)
@@ -194,7 +208,7 @@ def main_base():
     start = time.time()
     for epoch in range(1):
         for data in train_dataloader:
-            frames, bboxes, current_frame_path,mask,cls = data
+            past_frames,current_frame, bboxes, current_frame_path,mask,cls = data
             if 'indument' not in cls[0]:
                 continue
             mask=mask[0].numpy()
@@ -253,7 +267,7 @@ def main_base():
 
 def check_acc():
     # train_dataset,val_dataset=ini_datasets(dataset_name='ADL',original_split=False)
-    train_dataset = NAODatasetBase(mode='test',dataset_name=args.dataset)
+    train_dataset = NAODatasetClip(mode='test',dataset_name=args.dataset)
     # train_dataset.data.to_csv('/media/luohwu/T7/dataset/EPIC/test.csv')
     train_dataloader = DataLoader(train_dataset, batch_size=1,
                                   num_workers=8, shuffle=True,pin_memory=True,collate_fn=my_collate)

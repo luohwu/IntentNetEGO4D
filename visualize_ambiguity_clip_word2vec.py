@@ -14,7 +14,7 @@ import numpy as np
 from tools.Schedulers import *
 from data.dataset_ambiguity_clip import NAODatasetClip,my_collate
 from model.IntentNetAmbiguityClip import IntentNetClipWord2Vec,AttentionLossWord2Vec
-
+from model.IntentNetAmbiguityClip import compute_similarity
 experiment = Experiment(
     api_key="wU5pp8GwSDAcedNSr68JtvCpk",
     project_name="intentnetego4d-clip",
@@ -46,7 +46,7 @@ def main():
     model = IntentNetClipWord2Vec()
     model = nn.DataParallel(model)
 
-    model_path = os.path.join(args.exp_path, 'EGO4D', 'clip', 'ckpts/model_epoch_80.pth')
+    model_path = os.path.join(args.exp_path, 'EGO4D', 'clip', 'ckpts/model_epoch_20.pth')
     model.load_state_dict(
         torch.load(model_path, map_location='cpu')[
             'model_state_dict'])
@@ -79,7 +79,7 @@ def main():
                                   # sampler=torch.utils.data.SubsetRandomSampler(indices)
                                   )
     val_dataloader = DataLoader(val_dataset,
-                                batch_size=args.bs,
+                                batch_size=1,
                                 shuffle=True, num_workers=num_workers,
                                 pin_memory=True,
                                 # drop_last=True if torch.cuda.device_count() >= 4 else False,
@@ -125,7 +125,7 @@ def main():
     current_epoch = 0
     epoch_save = 5
     epoch=1
-    val_loss = eval(train_dataloader, model, criterion, epoch, illustration=True)
+    val_loss = eval(val_dataloader, model, criterion, epoch, illustration=True)
 
     experiment.log_metrics({"val_loss": val_loss}, step=epoch)
     print(f' test loss:{val_loss:.8f}')
@@ -154,12 +154,17 @@ def eval(test_dataloader, model, criterion, epoch, illustration):
     top_3_all=0
     with torch.no_grad():
         for idx, data in enumerate(test_dataloader):
-            frame,all_bboxes, img_path,mask,labels = data
-            frame=frame.to(device)
+            past_frames,current_frame,all_bboxes, img_path,mask,labels = data
+            past_frames=past_frames.to(device)
+            current_frame=current_frame.to(device)
             mask=mask.to(device)
 
-            output= model(frame)
-            del frame
+            output,decoder_feature,contributions= model(current_frame,past_frames)
+            similarity_list, attention_list = compute_similarity_and_interaction_scores_w2v(
+                labels[0],
+                output=output[0], bboxes=all_bboxes[0])
+            # print(f'similarity_list: {similarity_list}, attention_list: {attention_list}')
+            del current_frame,past_frames
 
 
             loss = criterion(output, mask,labels,all_bboxes)
@@ -178,10 +183,16 @@ def eval(test_dataloader, model, criterion, epoch, illustration):
                                                  (all_bboxes[i][0][2],all_bboxes[i][0][3]),(255,0,0),2)
                     # mask[all_bboxes[i][0][1]:all_bboxes[i][0][3],all_bboxes[i][0][0]:all_bboxes[i][0][2]]=1
                     ro_bboxes=all_bboxes[i][1:]
-                    for box in ro_bboxes:
+                    for j,box in enumerate(ro_bboxes):
                         original_image = cv2.rectangle(original_image, (box[0], box[1]),
                                                        (box[2], box[3]), (0, 255, 0), 2)
-                        mask[box[1]:box[3],box[0]:box[2]]=1
+                        # mask[box[1]:box[3], box[0]:box[2]] = 1
+                        font_size = 0.5
+                        # print(f'current j: {j}')
+                        cv2.putText(original_image, f'i:{attention_list[j]:.2f}', (box[0] + 5, box[1] + 25),
+                                    cv2.FONT_HERSHEY_SIMPLEX, font_size, (36, 12, 255), 1)
+                        cv2.putText(original_image, f's:{similarity_list[j]:.2f}', (box[0] + 5, box[1] + 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, font_size, (36, 12, 255), 1)
 
                     output_item=output[i]*255
                     output_item=output_item.cpu().detach().numpy().astype(np.uint8)
@@ -210,6 +221,23 @@ def eval(test_dataloader, model, criterion, epoch, illustration):
 
     return test_loss_avg
 
+def compute_similarity_and_interaction_scores_w2v(labels,output,bboxes):
+    similarity_list=[]
+    attention_list=[]
+    nao_bbox = bboxes[0]
+    nao_label=labels[0]
+    ro_bbox = bboxes[1:]
+    ro_labels=labels[1:]
+    for i,box in enumerate(ro_bbox):
+        # print(box)
+        label_ro=ro_labels[i]
+        similarity=compute_similarity(nao_label,label_ro)
+        similarity_list.append(similarity.item())
+
+        area = (box[2] - box[0] + 1) * (box[3] - box[1] + 1)
+        attention = output[box[1]:box[3], box[0]:box[2]].sum() / (area)
+        attention_list.append(attention.item())
+    return similarity_list,attention_list
 
 def compute_iou(bbox1,bbox2):
     area1=(bbox1[2]-bbox1[0])*(bbox1[3]-bbox1[1])

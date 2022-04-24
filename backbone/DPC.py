@@ -62,12 +62,12 @@ class DPC_RNN(nn.Module):
         _, hidden = self.agg(feature[:, 0:N-self.pred_step, :].contiguous())
         context = hidden[:,-1,:] # after tanh, (-1,1). get the hidden state of last layer, last time step
         pred = self.network_pred(context)
-        # pred_pooled=F.adaptive_avg_pool2d(pred,output_size=(1,1)).squeeze(-1).squeeze(-1)
-        # del pred
+        pred_pooled=F.adaptive_avg_pool2d(pred,output_size=(1,1)).squeeze(-1).squeeze(-1)
+        del pred
         del hidden
         del context
 
-        return pred
+        return pred_pooled
 
     def _initialize_weights(self, module):
         for name, param in module.named_parameters():
