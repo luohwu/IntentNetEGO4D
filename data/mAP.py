@@ -84,10 +84,13 @@ def compute_topK_result(item,k=5):
     num_pred=len(item['cls'])
     quota=(k)*num_gt
     idx=sorted(range(num_pred),key=lambda k:-item['interaction_scores'][k])
+    # if len(idx)>quota:
+    #     idx=idx[:quota]
     item['ro_bbox']=[item['ro_bbox'][i] for i in idx]
     item['scores'] = [item['scores'][i] for i in idx]
     item['cls'] = [item['cls'][i] for i in idx]
     item['interaction_scores'] = [item['interaction_scores'][i] for i in idx]
+    # return item
     # print(item['interaction_scores'])
     result_ro_bbox = []
     result_scores = []
@@ -104,10 +107,10 @@ def compute_topK_result(item,k=5):
                         result_ro_bbox.append(item['ro_bbox'][i])
                         result_cls.append(item['cls'][i])
                         result_scores.append(item['interaction_scores'][i])
-            # else:
-            #     result_ro_bbox.append(item['ro_bbox'][i])
-            #     result_cls.append(item['cls'][i])
-            #     result_scores.append(item['scores'][i])
+            else:
+                result_ro_bbox.append(item['ro_bbox'][i])
+                result_cls.append(item['cls'][i])
+                result_scores.append(item['scores'][i])
     else:
         # return item
         gt_label=item['noun']
@@ -121,14 +124,20 @@ def compute_topK_result(item,k=5):
                         result_ro_bbox.append(item['ro_bbox'][i])
                         result_cls.append(item['cls'][i])
                         result_scores.append(item['interaction_scores'][i])
-            # else:
-            #     result_ro_bbox.append(item['ro_bbox'][i])
-            #     result_cls.append(item['cls'][i])
-            #     result_scores.append(item['scores'][i])
+            else:
+                result_ro_bbox.append(item['ro_bbox'][i])
+                result_cls.append(item['cls'][i])
+                result_scores.append(item['scores'][i])
 
     item['ro_bbox'] = result_ro_bbox
     item['cls'] = result_cls
     item['interaction_scores'] = result_scores
+    # if len(item['cls'])>0:
+    #     item['ro_bbox'] = [item['ro_bbox'][0]]
+    #     item['cls'] = [item['cls'][0]]
+    #     item['interaction_scores'] = [item['interaction_scores'][0]]
+
+    print(f"num of gt: {num_gt}, num of pred: {num_pred}, num of result: {len(item['cls'])}")
 
     return item
 
@@ -142,6 +151,7 @@ if __name__=='__main__':
         item=data.iloc[i,:].copy()
         # print(item)
         item=compute_topK_result(item,5)
+        print(len(item['cls']))
         # print(item)
         #write gt
         gt_file=os.path.join(args.data_path,'map_input','ground-truth',f"{item['uid']}.txt")

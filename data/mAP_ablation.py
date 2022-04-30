@@ -3,7 +3,7 @@ sys.path.insert(0,'..')
 from opt import *
 from dataset_ambiguity import NAODatasetBase
 from ast import literal_eval
-import  numpy as np
+
 def compute_iou(bbox1,bbox2):
     area1=(bbox1[2]-bbox1[0])*(bbox1[3]-bbox1[1])
     area2=(bbox2[2]-bbox2[0])*(bbox2[3]-bbox2[1])
@@ -53,14 +53,15 @@ def make_sequence_dataset_for_eval(mode='train',dataset_name='EGO4D'):
                                              "ro_bbox":literal_eval,
                                              "noun":literal_eval,
                                              "scores":literal_eval,
-                                             "interaction_scores":literal_eval}
+                                             "interaction_scores":literal_eval
+                                             }
                                 )
             annos['img_path']=img_path
             annos['cls']=annos.apply(lambda row:[args.noun_categories[item] for item in row['cls']],axis=1)
             annos['nao_bbox']=annos.apply(unnormalize_bbox,axis=1)
 
             if not annos.empty:
-                annos_subset = annos[['uid', 'nao_bbox','noun','objects', 'clip_frame','ro_bbox','cls','scores',"interaction_scores"]]
+                annos_subset = annos[['uid', 'nao_bbox','noun','objects', 'clip_frame','ro_bbox','cls','scores','interaction_scores']]
                 df_items = df_items.append(annos_subset)
 
 
@@ -82,10 +83,12 @@ def compute_topK_result(item,k=5):
     num_gt=len(item['noun'])
     num_pred=len(item['cls'])
     quota=(k)*num_gt
-    idx=sorted(range(num_pred),key=lambda k:-item['scores'][k])
+    idx=sorted(range(num_pred),key=lambda k:-item['interaction_scores'][k])
     item['ro_bbox']=[item['ro_bbox'][i] for i in idx]
     item['scores'] = [item['scores'][i] for i in idx]
     item['cls'] = [item['cls'][i] for i in idx]
+    item['interaction_scores'] = [item['interaction_scores'][i] for i in idx]
+    # print(item['interaction_scores'])
     result_ro_bbox = []
     result_scores = []
     result_cls = []
@@ -100,11 +103,11 @@ def compute_topK_result(item,k=5):
                     if iou>0.5 and len(result_cls)<1:
                         result_ro_bbox.append(item['ro_bbox'][i])
                         result_cls.append(item['cls'][i])
-                        result_scores.append(item['scores'][i])
-            else:
-                result_ro_bbox.append(item['ro_bbox'][i])
-                result_cls.append(item['cls'][i])
-                result_scores.append(item['scores'][i])
+                        result_scores.append(item['interaction_scores'][i])
+            # else:
+            #     result_ro_bbox.append(item['ro_bbox'][i])
+            #     result_cls.append(item['cls'][i])
+            #     result_scores.append(item['scores'][i])
     else:
         # return item
         gt_label=item['noun']
@@ -117,15 +120,15 @@ def compute_topK_result(item,k=5):
                     if iou>0.5 and check_no_overlap(item['ro_bbox'][i],result_ro_bbox):
                         result_ro_bbox.append(item['ro_bbox'][i])
                         result_cls.append(item['cls'][i])
-                        result_scores.append(item['scores'][i])
-            else:
-                result_ro_bbox.append(item['ro_bbox'][i])
-                result_cls.append(item['cls'][i])
-                result_scores.append(item['scores'][i])
+                        result_scores.append(item['interaction_scores'][i])
+            # else:
+            #     result_ro_bbox.append(item['ro_bbox'][i])
+            #     result_cls.append(item['cls'][i])
+            #     result_scores.append(item['scores'][i])
 
     item['ro_bbox'] = result_ro_bbox
     item['cls'] = result_cls
-    item['scores'] = result_scores
+    item['interaction_scores'] = result_scores
 
     return item
 
@@ -143,21 +146,12 @@ if __name__=='__main__':
         #write gt
         gt_file=os.path.join(args.data_path,'map_input','ground-truth',f"{item['uid']}.txt")
         pred_file=os.path.join(args.data_path,'map_input','detection-results',f"{item['uid']}.txt")
-        num_gt=len(item['nao_bbox'])
-        num_pred=len(item['ro_bbox'])
-        num_random_pick=5*num_gt
-        if num_pred>0:
-            idx_random_pick=np.random.randint(low=0,high=num_pred,size=num_random_pick).tolist()
-        else:
-            idx_random_pick =[]
         with open(gt_file,'w') as f:
             for idx_bbox,bbox in enumerate(item['nao_bbox']):
                 f.write(f"{item['noun'][idx_bbox]} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}\n")
             f.close()
         # write prediction
         with open(pred_file,'w') as f:
-            # picked_ro_bbox=[item['ro_bbox'][idx] for idx in idx_random_pick]
-            for idx in idx_random_pick:
-                bbox=item['ro_bbox'][idx]
-                f.write(f"{item['cls'][idx]} {item['scores'][idx]} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}\n")
+            for idx_bbox,bbox in enumerate(item['ro_bbox']):
+                f.write(f"{item['cls'][idx_bbox]} {item['interaction_scores'][idx_bbox]} {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]}\n")
             f.close()
