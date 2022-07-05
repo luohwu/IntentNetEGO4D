@@ -89,7 +89,7 @@ def main():
     model=nn.DataParallel(model)
     total_params = sum(p.numel() for p in model.parameters())
     print(f'model size: {total_params}')
-    model_path=os.path.join(args.exp_path,'EGO4D/clip/ckpts/model_epoch_10.pth')
+    model_path=args.model_path
     print(model_path)
     model.load_state_dict(
         torch.load(model_path, map_location='cpu')[

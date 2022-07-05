@@ -20,7 +20,7 @@ p_dropout=0.2
 import gensim.downloader
 
 import kornia
-from backbone.DPC import DPC_RNN
+from backbone.EgoMotionNet import EgoMotionNet
 
 
 
@@ -72,7 +72,7 @@ class IntentNetClipWord2Vec(nn.Module):
         #     nn.ReLU(),
         # )
 
-        self.backbone=DPC_RNN(sample_size=128,num_seq=5,seq_len=5,pred_step=0,network='resnet18')
+        self.backbone=EgoMotionNet(sample_size=128, num_seq=5, seq_len=5, pred_step=0, network='resnet18')
         self.backbone=load_backbone_state(self.backbone)
         # self.backbone=nn.DataParallel(self.backbone).to(device)
         # for param in self.backbone.module.parameters():

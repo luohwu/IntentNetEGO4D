@@ -22,7 +22,7 @@ experiment = Experiment(
 )
 experiment.log_code('data/dataset_ambiguity_clip.py')
 experiment.log_code('model/IntentNetAmbiguityClip.py')
-experiment.log_code('backbone/DPC.py')
+experiment.log_code('backbone/EgoMotionNet.py')
 experiment.log_parameters(args.__dict__)
 SEED = args.seed
 torch.manual_seed(SEED)

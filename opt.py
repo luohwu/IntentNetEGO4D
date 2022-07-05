@@ -22,10 +22,6 @@ parser = argparse.ArgumentParser(description='training parameters')
 parser.add_argument('--dataset', type=str, default='EGO4D',
                     help='EPIC , ADL, EGO4D')
 
-parser.add_argument('--dataset_file', type=str, default='dataset_5sx2.tar.gz',
-                    help='EPIC or ADL')
-parser.add_argument('--original_split', default=False, action="store_true",
-                    help='original train/test split or split after mixing')
 
 parser.add_argument('--euler', default=False,action="store_true",
                     help='runing on euler or local computer')
@@ -60,6 +56,14 @@ parser.add_argument('--lr', default=3e-4, type=float, help='learning rate')
 parser.add_argument('--weight_decay', default=0.05, help='weight decay')
 parser.add_argument('--SGD', default=False,action="store_true",
                     help="using SGD or Adam")
+parser.add_argument('--data_path', default='/data/luohwu/dataset/EGO4D',type=str,
+                    help="path to datasset")
+parser.add_argument('--exp_path', default='/data/luohwu/experiments',type=str,
+                    help="path to save experiment results")
+parser.add_argument('--model_path', default='./pre-train_models/model_epoch_10.pth',type=str,
+                    help="path to save experiment results")
+
+
 args = parser.parse_args()
 if args.euler:
     # running on euler
@@ -84,10 +88,10 @@ elif args.ait:
     args.exp_path = '/data/luohwu/experiments'
 else:
     # running on local computer
-    args.data_path = '/home/luohwu/ait-data/dataset/EGO4D/'
-    args.annos_path = '/home/luohwu/ait-data/dataset/EGO4D/nao_annotations'
-    args.frames_path = '/home/luohwu/ait-data/dataset/EGO4D/rgb_frames'
-    args.exp_path = '/home/luohwu/ait-data/experiments'
+    # args.data_path = '/home/luohwu/ait-data/dataset/EGO4D/'
+    args.annos_path = os.path.join(args.data_path,'nao_annotations')
+    args.frames_path = os.path.join(args.data_path,'rgb_frames')
+    # args.exp_path = '/home/luohwu/ait-data/experiments'
 
 
 
