@@ -47,4 +47,4 @@ explanations:
 <li>model_path: path to pre-trained model</li>
 </ul>
 
-Pretrained models are available in `./pre-trained_models/`
+Pretrained models are available in `./pre-trained_models`
