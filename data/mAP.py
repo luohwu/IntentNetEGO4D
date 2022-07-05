@@ -107,10 +107,10 @@ def compute_topK_result(item,k=5):
                         result_ro_bbox.append(item['ro_bbox'][i])
                         result_cls.append(item['cls'][i])
                         result_scores.append(item['interaction_scores'][i])
-            else:
-                result_ro_bbox.append(item['ro_bbox'][i])
-                result_cls.append(item['cls'][i])
-                result_scores.append(item['scores'][i])
+            # else:
+            #     result_ro_bbox.append(item['ro_bbox'][i])
+            #     result_cls.append(item['cls'][i])
+            #     result_scores.append(item['scores'][i])
     else:
         # return item
         gt_label=item['noun']
@@ -124,10 +124,10 @@ def compute_topK_result(item,k=5):
                         result_ro_bbox.append(item['ro_bbox'][i])
                         result_cls.append(item['cls'][i])
                         result_scores.append(item['interaction_scores'][i])
-            else:
-                result_ro_bbox.append(item['ro_bbox'][i])
-                result_cls.append(item['cls'][i])
-                result_scores.append(item['scores'][i])
+            # else:
+            #     result_ro_bbox.append(item['ro_bbox'][i])
+            #     result_cls.append(item['cls'][i])
+            #     result_scores.append(item['scores'][i])
 
     item['ro_bbox'] = result_ro_bbox
     item['cls'] = result_cls
